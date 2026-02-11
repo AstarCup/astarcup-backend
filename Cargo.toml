@@ -1,6 +1,6 @@
 [package]
 name = "astracup-backend"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 authors = ["AstraCup Team"]
 description = "AstraCup tournament management backend"
@@ -15,8 +15,8 @@ tower = "0.5.3"
 tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 
 # Database
-sea-orm = { version = "0.12", features = ["sqlx-mysql", "runtime-tokio-native-tls", "macros"] }
-sqlx = { version = "0.7", features = ["mysql", "runtime-tokio-native-tls"] }
+sea-orm = { version = "1.1.19", features = ["sqlx-mysql", "runtime-tokio-native-tls", "macros"] }
+sqlx = { version = "0.8.6", features = ["mysql", "runtime-tokio-native-tls"] }
 dotenv = "0.15"
 
 # Serialization
@@ -46,7 +46,7 @@ validator = { version = "0.20", features = ["derive"] }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.0", features = ["v4", "serde"] }
+uuid = { version = "1.20", features = ["v4", "serde"] }
 futures = "0.3"
 axum-extra = { version = "0.12.5", features = ["typed-header"] }
 
