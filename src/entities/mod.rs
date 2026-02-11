@@ -2,7 +2,6 @@ pub mod prelude;
 
 pub use prelude::*;
 
-// 实体定义 - 基于Prisma模型（完全迁移）
 pub mod user;
 pub mod team;
 pub mod tournament_config;
