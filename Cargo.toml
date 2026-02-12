@@ -49,6 +49,8 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.20", features = ["v4", "serde"] }
 futures = "0.3"
 axum-extra = { version = "0.12.5", features = ["typed-header"] }
+utoipa = { version = "5.4.0", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 
 [dev-dependencies]
 # Testing
