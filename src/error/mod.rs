@@ -36,6 +36,9 @@ pub enum AppError {
 
     #[error("内部服务器错误: {0}")]
     InternalError(String),
+
+    #[error("功能未实现: {0}")]
+    NotImplemented(String),
 }
 
 impl AppError {
@@ -48,7 +51,7 @@ impl AppError {
             AppError::BusinessError(_) => StatusCode::BAD_REQUEST,
             AppError::ConfigError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::ExternalApiError(_) => StatusCode::BAD_GATEWAY,
-            AppError::DatabaseError(_) | AppError::InternalError(_) => {
+            AppError::DatabaseError(_) | AppError::InternalError(_) | AppError::NotImplemented(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         }
@@ -65,6 +68,7 @@ impl AppError {
             AppError::ConfigError(msg) => format!("配置错误: {}", msg),
             AppError::ExternalApiError(msg) => format!("外部API错误: {}", msg),
             AppError::InternalError(msg) => format!("内部服务器错误: {}", msg),
+            AppError::NotImplemented(msg) => format!("功能未实现: {}", msg),
         }
     }
 }

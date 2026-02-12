@@ -14,26 +14,36 @@ pub fn configure_routes() -> Router<ServiceState> {
         .route("/health", get(|| async { "OK" }))
         .nest("/api/auth", auth::routes())
         .nest("/api/users", user::routes())
-        .with_state(())
 }
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        auth::osu_auth,
+        auth::osu_callback,
+        auth::refresh_token,
+        auth::logout,
         user::get_users,
         user::get_user,
         user::update_user,
         user::update_user_group,
         user::delete_user,
+        user::update_registration_status,
+        user::update_season,
+        user::update_approved,
     ),
     components(
         schemas(
             crate::dto::user::UserResponse,
             crate::dto::user::UpdateUserRequest,
             crate::dto::user::UpdateUserGroupRequest,
+            crate::dto::user::UpdateRegistrationStatusRequest,
+            crate::dto::user::UpdateSeasonRequest,
+            crate::dto::user::UpdateApprovedRequest,
             crate::dto::user::UserQueryParams,
-            crate::dto::ApiResponse<crate::dto::user::UserResponse>,
-            crate::dto::PaginatedResponse<crate::dto::user::UserResponse>,
+            crate::dto::ApiResponseSchema<crate::dto::user::UserResponse>,
+            crate::dto::ApiResponseSchema<crate::api::auth::AuthResponse>,
+            crate::dto::PaginatedResponseSchema<crate::dto::user::UserResponse>,
             user::PaginatedUserResponse,
         )
     ),

@@ -54,6 +54,7 @@ pub struct UserResponse {
     pub approved: Option<i32>,
     pub user_group: String,
     pub season: Option<i32>,
+    pub registration_status: Option<String>,
     pub gu_server_user_id: Option<i32>,
     pub gu_server_username: Option<String>,
     pub created_at: String,
@@ -75,6 +76,9 @@ impl From<UserModel> for UserResponse {
             approved: user.approved,
             user_group: format!("{:?}", user.user_group),
             season: user.season,
+            registration_status: user
+                .registration_status
+                .map(|status| format!("{:?}", status)),
             gu_server_user_id: user.gu_server_user_id,
             gu_server_username: user.gu_server_username,
             created_at: user.created_at.to_rfc3339(),
@@ -88,7 +92,23 @@ pub struct UpdateUserGroupRequest {
     pub user_group: String,
 }
 
-#[derive(Debug, Deserialize, Validate, utoipa::IntoParams)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct UpdateRegistrationStatusRequest {
+    pub registration_status: String,
+}
+
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct UpdateSeasonRequest {
+    pub season: i32,
+}
+
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct UpdateApprovedRequest {
+    pub approved: i32,
+}
+
+#[derive(Debug, Deserialize, Validate, utoipa::IntoParams, utoipa::ToSchema)]
+#[schema(description = "用户查询参数")]
 pub struct UserQueryParams {
     pub username: Option<String>,
     pub country: Option<String>,
