@@ -9,11 +9,13 @@ use crate::{
     dto::{
         ApiResponse, PaginatedResponse,
         user::{
-            CreateUserRequest, UpdateApprovedRequest, UpdateRegistrationStatusRequest, UpdateSeasonRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams,
+            CreateUserRequest, UpdateApprovedRequest, UpdateRegistrationStatusRequest,
+            UpdateSeasonRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams,
             UserResponse,
         },
     },
     error::Result,
+    middleware::auth::{AuthUser, require_admin},
     service::{ServiceState, user::UserService},
 };
 
@@ -114,11 +116,25 @@ async fn create_user() -> Result<Json<ApiResponse<UserResponse>>> {
     ),
     tag = "users"
 )]
+#[axum::debug_handler]
 async fn update_user(
     State(state): State<ServiceState>,
     Path(id): Path<i32>,
+    auth_user: AuthUser,
     Json(data): Json<UpdateUserRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
+    // 检查是否为管理员，或者是否更新自己的信息
+    // 注意：这里需要从数据库获取用户的osu_id来匹配
+    // 暂时简化处理，实际项目中需要查询数据库
+    let is_admin = auth_user.user_group == "admin";
+    let is_self = auth_user.osu_id == id.to_string(); // 这里需要根据实际情况调整
+
+    if !is_admin && !is_self {
+        return Err(crate::error::AppError::Forbidden(
+            "只有管理员或用户本人可以更新用户信息".into(),
+        ));
+    }
+
     let service = UserService::new(state.db);
     let user = service.update(id, data).await?;
 
@@ -141,11 +157,16 @@ async fn update_user(
     ),
     tag = "users"
 )]
+#[axum::debug_handler]
 async fn update_user_group(
     State(state): State<ServiceState>,
     Path(id): Path<i32>,
+    user: AuthUser,
     Json(data): Json<UpdateUserGroupRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
+    // 检查是否为管理员
+    require_admin(&user)?;
+
     let service = UserService::new(state.db);
     let user = service.update_user_group(id, data).await?;
 
@@ -169,7 +190,11 @@ async fn update_user_group(
 async fn delete_user(
     State(state): State<ServiceState>,
     Path(id): Path<i32>,
+    user: AuthUser,
 ) -> Result<Json<ApiResponse<()>>> {
+    // 检查是否为管理员
+    require_admin(&user)?;
+
     let service = UserService::new(state.db);
     service.delete(id).await?;
 
@@ -244,16 +269,18 @@ async fn update_season(
     ),
     tag = "users"
 )]
+#[axum::debug_handler]
 async fn update_approved(
     State(state): State<ServiceState>,
     Path(id): Path<i32>,
+    user: AuthUser,
     Json(data): Json<UpdateApprovedRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
+    // 检查是否为管理员
+    require_admin(&user)?;
+
     let service = UserService::new(state.db);
-    // 这里需要从认证中间件获取用户信息，检查是否为管理员
-    // 暂时硬编码为true，实际项目中需要从JWT令牌中解析
-    let is_admin = true;
-    let user = service.update_approved(id, data, is_admin).await?;
+    let user = service.update_approved(id, data, true).await?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }

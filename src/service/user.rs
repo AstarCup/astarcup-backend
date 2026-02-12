@@ -207,4 +207,13 @@ impl UserService {
 
         Ok(user.update(&self.db).await?)
     }
+
+    pub async fn update_gu_server_info(&self, id: i32, gu_user_id: i32, gu_username: String) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.gu_server_user_id = Set(Some(gu_user_id));
+        user.gu_server_username = Set(Some(gu_username));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
 }

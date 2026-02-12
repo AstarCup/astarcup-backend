@@ -50,7 +50,7 @@ impl TournamentSettingService {
         tournament_settings::Entity::find_by_id(id)
             .one(&self.db)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("锦标赛设置 {} 不存在", id)))
+            .ok_or_else(|| AppError::NotFound(format!("比赛设置 {} 不存在", id)))
     }
 
     pub async fn create(
@@ -116,7 +116,7 @@ impl TournamentSettingService {
             .exec(&self.db)
             .await?;
         if result.rows_affected == 0 {
-            return Err(AppError::NotFound(format!("锦标赛设置 {} 不存在", id)));
+            return Err(AppError::NotFound(format!("比赛设置 {} 不存在", id)));
         }
         Ok(())
     }
