@@ -18,52 +18,34 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(User::OsuId)
-                            .integer()
-                            .not_null()
-                            .unique_key(),
-                    )
+                    .col(ColumnDef::new(User::OsuId).string().not_null().unique_key())
                     .col(
                         ColumnDef::new(User::Username)
                             .string()
                             .not_null()
                             .unique_key(),
                     )
+                    .col(
+                        ColumnDef::new(User::RegisteredAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
                     .col(ColumnDef::new(User::AvatarUrl).string().null())
-                    .col(ColumnDef::new(User::CoverUrl).string().null())
-                    .col(
-                        ColumnDef::new(User::UserState)
-                            .enumeration("userstate", vec!["active", "banned", "deleted"])
-                            .not_null()
-                            .default(UserState::Active),
-                    )
-                    .col(ColumnDef::new(User::Pp).float().not_null().default(0.0))
-                    .col(ColumnDef::new(User::CountryCode).string())
+                    .col(ColumnDef::new(User::Pp).float().null())
                     .col(ColumnDef::new(User::GlobalRank).integer().null())
+                    .col(ColumnDef::new(User::Country).string().null())
                     .col(ColumnDef::new(User::CountryRank).integer().null())
-                    .col(ColumnDef::new(User::Level).integer().not_null().default(1))
+                    .col(ColumnDef::new(User::Approved).integer().null())
                     .col(
-                        ColumnDef::new(User::RegisteredSeasonal)
-                            .integer()
+                        ColumnDef::new(User::UserGroup)
+                            .enumeration("usergroup", vec!["player", "admin"])
                             .not_null()
-                            .default(1),
+                            .default("player"),
                     )
-                    // gu服绑定
-                    .col(
-                        ColumnDef::new(User::GuServerId)
-                            .integer()
-                            .null()
-                            .unique_key(),
-                    )
+                    .col(ColumnDef::new(User::Season).integer().null())
+                    .col(ColumnDef::new(User::GuServerUserId).integer().null())
                     .col(ColumnDef::new(User::GuServerUsername).string().null())
-                    // 用户组
-                    .col(
-                        ColumnDef::new(User::UserGroupType)
-                            .enumeration("usergrouptype", vec!["player", "admin"])
-                            .not_null()
-                            .default(UserGroupType::Player),
-                    )
                     .col(
                         ColumnDef::new(User::CreatedAt)
                             .timestamp()
@@ -96,54 +78,17 @@ enum User {
     Id,
     OsuId,
     Username,
+    RegisteredAt,
     AvatarUrl,
-    CoverUrl,
-    UserState,
-    CountryCode,
-    CountryRank,
-    RegisteredSeasonal,
-    GuServerId,
-    GuServerUsername,
-    UserGroupType,
-    CreatedAt,
-    UpdatedAt,
-    Level,
     Pp,
     GlobalRank,
-}
-
-#[derive(DeriveIden)]
-enum UserState {
-    Table,
-    Active,
-    Banned,
-    Deleted,
-}
-
-#[derive(DeriveIden)]
-enum UserGroupType {
-    Table,
-    Player,
-    Admin,
-}
-
-impl Into<Expr> for UserState {
-    fn into(self) -> Expr {
-        match self {
-            UserState::Active => Expr::val("active"),
-            UserState::Banned => Expr::val("banned"),
-            UserState::Deleted => Expr::val("deleted"),
-            UserState::Table => Expr::val("userstate"),
-        }
-    }
-}
-
-impl Into<Expr> for UserGroupType {
-    fn into(self) -> Expr {
-        match self {
-            UserGroupType::Player => Expr::val("player"),
-            UserGroupType::Admin => Expr::val("admin"),
-            UserGroupType::Table => Expr::val("usergrouptype"),
-        }
-    }
+    Country,
+    CountryRank,
+    Approved,
+    UserGroup,
+    Season,
+    GuServerUserId,
+    GuServerUsername,
+    CreatedAt,
+    UpdatedAt,
 }

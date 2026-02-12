@@ -1,0 +1,139 @@
+use sea_orm_migration::{prelude::*, schema::*};
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(MapSelections::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(MapSelections::Id)
+                            .integer()
+                            .not_null()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::BeatmapId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::BeatmapsetId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(MapSelections::Title).string().not_null())
+                    .col(ColumnDef::new(MapSelections::TitleUnicode).string().null())
+                    .col(ColumnDef::new(MapSelections::Artist).string().not_null())
+                    .col(ColumnDef::new(MapSelections::ArtistUnicode).string().null())
+                    .col(ColumnDef::new(MapSelections::Version).string().not_null())
+                    .col(ColumnDef::new(MapSelections::Creator).string().not_null())
+                    .col(
+                        ColumnDef::new(MapSelections::StarRating)
+                            .decimal()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(MapSelections::Bpm).decimal().not_null())
+                    .col(
+                        ColumnDef::new(MapSelections::TotalLength)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(MapSelections::MaxCombo).integer().not_null())
+                    .col(ColumnDef::new(MapSelections::Ar).decimal().not_null())
+                    .col(ColumnDef::new(MapSelections::Cs).decimal().not_null())
+                    .col(ColumnDef::new(MapSelections::Od).decimal().not_null())
+                    .col(ColumnDef::new(MapSelections::Hp).decimal().not_null())
+                    .col(
+                        ColumnDef::new(MapSelections::SelectedMods)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::ModPosition)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(MapSelections::Comment).text().null())
+                    .col(
+                        ColumnDef::new(MapSelections::SelectedBy)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::SelectedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(MapSelections::Season).string().not_null())
+                    .col(ColumnDef::new(MapSelections::Category).string().not_null())
+                    .col(ColumnDef::new(MapSelections::Url).text().not_null())
+                    .col(ColumnDef::new(MapSelections::CoverUrl).text().null())
+                    .col(ColumnDef::new(MapSelections::Approved).integer().null())
+                    .col(ColumnDef::new(MapSelections::Padding).integer().null())
+                    .col(
+                        ColumnDef::new(MapSelections::CreatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::UpdatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(MapSelections::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum MapSelections {
+    Table,
+    Id,
+    BeatmapId,
+    BeatmapsetId,
+    Title,
+    TitleUnicode,
+    Artist,
+    ArtistUnicode,
+    Version,
+    Creator,
+    StarRating,
+    Bpm,
+    TotalLength,
+    MaxCombo,
+    Ar,
+    Cs,
+    Od,
+    Hp,
+    SelectedMods,
+    ModPosition,
+    Comment,
+    SelectedBy,
+    SelectedAt,
+    Season,
+    Category,
+    Url,
+    CoverUrl,
+    Approved,
+    Padding,
+    CreatedAt,
+    UpdatedAt,
+}
