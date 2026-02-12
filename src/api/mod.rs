@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod tournament_settings;
 pub mod user;
 
 use axum::{Router, routing::get};
@@ -14,6 +15,7 @@ pub fn configure_routes() -> Router<ServiceState> {
         .route("/health", get(|| async { "OK" }))
         .nest("/api/auth", auth::routes())
         .nest("/api/users", user::routes())
+        .nest("/api/tournament-settings", tournament_settings::routes())
 }
 
 #[derive(OpenApi)]
@@ -31,6 +33,8 @@ pub fn configure_routes() -> Router<ServiceState> {
         user::update_registration_status,
         user::update_season,
         user::update_approved,
+        tournament_settings::get_tournament_settings,
+        tournament_settings::update_tournament_settings,
     ),
     components(
         schemas(
@@ -45,11 +49,16 @@ pub fn configure_routes() -> Router<ServiceState> {
             crate::dto::ApiResponseSchema<crate::api::auth::AuthResponse>,
             crate::dto::PaginatedResponseSchema<crate::dto::user::UserResponse>,
             user::PaginatedUserResponse,
+            crate::dto::tournament_settings::TournamentSettingResponse,
+            crate::dto::tournament_settings::UpdateTournamentSettingRequest,
+            crate::dto::tournament_settings::TournamentSettingQueryParams,
+            crate::api::tournament_settings::PaginatedTournamentSettingsResponse,
         )
     ),
     tags(
         (name = "auth", description = "认证相关API"),
         (name = "users", description = "用户管理API"),
+        (name = "tournament-settings", description = "比赛设置API"),
     )
 )]
 pub struct ApiDoc;

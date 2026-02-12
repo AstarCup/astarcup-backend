@@ -23,6 +23,8 @@ pub fn routes() -> Router<ServiceState> {
     Router::new()
         .route("/osu", get(osu_auth))
         .route("/callback/osu", get(osu_callback))
+        .route("/gu", get(gu_auth))
+        .route("/callback/gu", get(gu_callback))
         .route("/refresh", get(refresh_token))
         .route("/logout", get(logout))
 }
@@ -64,6 +66,29 @@ async fn osu_auth() -> Redirect {
 
     let auth_url = format!(
         "https://osu.ppy.sh/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify%20public&state={}",
+        client_id,
+        urlencoding::encode(&redirect_uri),
+        state
+    );
+
+    Redirect::to(&auth_url)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/auth/gu",
+    responses(
+        (status = 302, description = "重定向到GU授权页面"),
+    ),
+    tag = "auth"
+)]
+async fn gu_auth() -> Redirect {
+    let client_id = env::var("GU_CLIENT_ID").expect("GU_CLIENT_ID not set");
+    let redirect_uri = env::var("GU_REDIRECT_URI").expect("GU_REDIRECT_URI not set");
+    let state = Uuid::new_v4().to_string();
+
+    let auth_url = format!(
+        "https://lazer-api.g0v0.top/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify%20public&state={}",
         client_id,
         urlencoding::encode(&redirect_uri),
         state
@@ -221,4 +246,140 @@ async fn logout() -> Result<Json<ApiResponse<()>>> {
     // 实现登出逻辑
     // 这里需要清除客户端的令牌
     Ok(Json(ApiResponse::success_with_message((), "登出成功")))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/auth/callback/gu",
+    params(
+        ("code" = String, Query, description = "GU OAuth回调代码"),
+        ("state" = String, Query, description = "状态参数"),
+    ),
+    responses(
+        (status = 200, description = "OAuth回调成功"),
+        (status = 400, description = "请求参数错误"),
+        (status = 500, description = "内部服务器错误"),
+    ),
+    tag = "auth"
+)]
+async fn gu_callback(
+    Query(params): Query<OsuCallbackQuery>,
+    State(state): State<ServiceState>,
+) -> Result<Json<ApiResponse<AuthResponse>>> {
+    let client_id = env::var("GU_CLIENT_ID").expect("GU_CLIENT_ID not set");
+    let client_secret = env::var("GU_CLIENT_SECRET").expect("GU_CLIENT_SECRET not set");
+    let redirect_uri = env::var("GU_REDIRECT_URI").expect("GU_REDIRECT_URI not set");
+
+    // 获取访问令牌
+    let client = Client::new();
+    let token_response = client
+        .post("https://lazer-api.g0v0.top/oauth/token")
+        .json(&serde_json::json!({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": params.code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!("Failed to get token: {}", e))
+        })?
+        .json::<OsuTokenResponse>()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!(
+                "Failed to parse token response: {}",
+                e
+            ))
+        })?;
+
+    // 获取用户信息
+    let user_data = client
+        .get("https://lazer-api.g0v0.top/api/v2/me")
+        .header(
+            "Authorization",
+            format!("Bearer {}", token_response.access_token),
+        )
+        .send()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!("Failed to get user info: {}", e))
+        })?
+        .json::<OsuUserData>()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!("Failed to parse user info: {}", e))
+        })?;
+
+    // 处理用户数据
+    let user_service = UserService::new(state.db);
+    let existing_user = user_service.find_by_osu_id(&user_data.id).await?;
+
+    // 提前复制需要的值，避免移动后借用
+    let user_id = user_data.id.clone();
+    let username = user_data.username.clone();
+
+    let user = match existing_user {
+        Some(existing) => {
+            // 更新现有用户，包括GU服务器信息
+            let update_request = crate::dto::user::UpdateUserRequest {
+                username: Some(username.clone()),
+                avatar_url: user_data.avatar_url,
+                pp: user_data.statistics.as_ref().and_then(|s| s.pp),
+                global_rank: user_data.statistics.as_ref().and_then(|s| s.global_rank),
+                country: user_data.country.as_ref().map(|c| c.code.clone()),
+                country_rank: user_data.statistics.as_ref().and_then(|s| s.country_rank),
+                approved: None,
+                season: None,
+            };
+            let updated_user = user_service.update(existing.id, update_request).await?;
+
+            // 更新用户的gu_server_user_id和gu_server_username
+            let gu_user_id = user_id.parse::<i32>().unwrap_or(0);
+            let updated_user_with_gu_info = user_service
+                .update_gu_server_info(updated_user.id, gu_user_id, username.clone())
+                .await?;
+            updated_user_with_gu_info
+        }
+        None => {
+            // 创建新用户
+            let create_request = CreateUserRequest {
+                username: username.clone(),
+                avatar_url: user_data.avatar_url,
+                pp: user_data.statistics.as_ref().and_then(|s| s.pp),
+                global_rank: user_data.statistics.as_ref().and_then(|s| s.global_rank),
+                country: user_data.country.as_ref().map(|c| c.code.clone()),
+                country_rank: user_data.statistics.as_ref().and_then(|s| s.country_rank),
+            };
+            let new_user = user_service.create(user_id.clone(), create_request).await?;
+
+            // 设置用户的gu_server_user_id和gu_server_username
+            let gu_user_id = user_id.parse::<i32>().unwrap_or(0);
+            let new_user_with_gu_info = user_service
+                .update_gu_server_info(new_user.id, gu_user_id, username.clone())
+                .await?;
+            new_user_with_gu_info
+        }
+    };
+
+    // 生成JWT令牌
+    let osu_id = user.osu_id.clone();
+    let user_group_str = match user.user_group {
+        crate::entity::sea_orm_active_enums::UserGroup::Player => "player",
+        crate::entity::sea_orm_active_enums::UserGroup::Admin => "admin",
+    };
+    let jwt_token =
+        crate::utils::jwt::generate_token(osu_id, user_group_str.to_string()).map_err(|e| {
+            crate::error::AppError::InternalError(format!("Failed to generate token: {}", e))
+        })?;
+
+    let auth_response = AuthResponse {
+        access_token: jwt_token,
+        refresh_token: token_response.refresh_token,
+        user: crate::dto::user::UserResponse::from(user),
+    };
+
+    Ok(Json(ApiResponse::success(auth_response)))
 }

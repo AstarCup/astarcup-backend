@@ -30,9 +30,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     print_banner();
     println!("启动 AstraCup 后端服务...");
-    println!("配置加载成功");
-    println!("监听地址: {}:{}", config.host, config.port);
-    println!("数据库: {}", mask_database_url(&config.database_url));
 
     println!("连接数据库...");
     let db = Database::connect(&config.database_url).await?;
@@ -42,8 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service_state = ServiceState::new(db);
 
     // 配置应用
-    let app = api::configure_routes()
-        .with_state(service_state);
+    let app = api::configure_routes().with_state(service_state);
+
+    println!("配置加载成功");
 
     // 启动服务器
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", config.host, config.port))
@@ -51,6 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
 
     println!("服务器启动成功");
+    println!("监听地址: {}:{}", config.host, config.port);
+    println!("数据库: {}", mask_database_url(&config.database_url));
     println!("API文档: http://{}:{}/api/docs", config.host, config.port);
     println!("健康检查: http://{}:{}/health", config.host, config.port);
 
