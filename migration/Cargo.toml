@@ -19,5 +19,7 @@ features = [
     # e.g.
     # "runtime-tokio-rustls",  # `ASYNC_RUNTIME` feature
     # "sqlx-postgres",         # `DATABASE_DRIVER` feature
+    "sqlx-mysql",
+    "runtime-tokio-native-tls",
 ]
 version = "2.0.0-rc.31"
