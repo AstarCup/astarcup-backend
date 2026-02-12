@@ -39,11 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("数据库连接成功");
 
     // 创建服务状态
-    let service_state = Arc::new(ServiceState::new(db));
+    let service_state = ServiceState::new(db);
 
     // 配置应用
     let app = api::configure_routes()
-        .layer(middleware::configure_middleware())
         .with_state(service_state);
 
     // 启动服务器

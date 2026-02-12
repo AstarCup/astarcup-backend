@@ -9,7 +9,7 @@ use crate::{
     dto::{
         ApiResponse, PaginatedResponse,
         user::{
-            CreateUserRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams,
+            CreateUserRequest, UpdateApprovedRequest, UpdateRegistrationStatusRequest, UpdateSeasonRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams,
             UserResponse,
         },
     },
@@ -25,6 +25,9 @@ pub fn routes() -> Router<ServiceState> {
         .route("/{id}", put(update_user))
         .route("/{id}", delete(delete_user))
         .route("/{id}/user-group", put(update_user_group))
+        .route("/{id}/registration-status", put(update_registration_status))
+        .route("/{id}/season", put(update_season))
+        .route("/{id}/approve", put(update_approved))
 }
 
 #[utoipa::path(
@@ -171,6 +174,88 @@ async fn delete_user(
     service.delete(id).await?;
 
     Ok(Json(ApiResponse::success_with_message((), "用户删除成功")))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/users/{id}/registration-status",
+    params(
+        ("id" = i32, Path, description = "用户ID")
+    ),
+    request_body = UpdateRegistrationStatusRequest,
+    responses(
+        (status = 200, description = "更新注册状态成功", body = UserResponse),
+        (status = 400, description = "请求参数错误"),
+        (status = 401, description = "未授权"),
+        (status = 404, description = "用户不存在"),
+    ),
+    tag = "users"
+)]
+async fn update_registration_status(
+    State(state): State<ServiceState>,
+    Path(id): Path<i32>,
+    Json(data): Json<UpdateRegistrationStatusRequest>,
+) -> Result<Json<ApiResponse<UserResponse>>> {
+    let service = UserService::new(state.db);
+    let user = service.update_registration_status(id, data).await?;
+
+    Ok(Json(ApiResponse::success(UserResponse::from(user))))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/users/{id}/season",
+    params(
+        ("id" = i32, Path, description = "用户ID")
+    ),
+    request_body = UpdateSeasonRequest,
+    responses(
+        (status = 200, description = "更新赛季成功", body = UserResponse),
+        (status = 400, description = "请求参数错误"),
+        (status = 401, description = "未授权"),
+        (status = 404, description = "用户不存在"),
+    ),
+    tag = "users"
+)]
+async fn update_season(
+    State(state): State<ServiceState>,
+    Path(id): Path<i32>,
+    Json(data): Json<UpdateSeasonRequest>,
+) -> Result<Json<ApiResponse<UserResponse>>> {
+    let service = UserService::new(state.db);
+    let user = service.update_season(id, data).await?;
+
+    Ok(Json(ApiResponse::success(UserResponse::from(user))))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/users/{id}/approve",
+    params(
+        ("id" = i32, Path, description = "用户ID")
+    ),
+    request_body = UpdateApprovedRequest,
+    responses(
+        (status = 200, description = "更新审批状态成功", body = UserResponse),
+        (status = 400, description = "请求参数错误"),
+        (status = 401, description = "未授权"),
+        (status = 403, description = "权限不足"),
+        (status = 404, description = "用户不存在"),
+    ),
+    tag = "users"
+)]
+async fn update_approved(
+    State(state): State<ServiceState>,
+    Path(id): Path<i32>,
+    Json(data): Json<UpdateApprovedRequest>,
+) -> Result<Json<ApiResponse<UserResponse>>> {
+    let service = UserService::new(state.db);
+    // 这里需要从认证中间件获取用户信息，检查是否为管理员
+    // 暂时硬编码为true，实际项目中需要从JWT令牌中解析
+    let is_admin = true;
+    let user = service.update_approved(id, data, is_admin).await?;
+
+    Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
 
 #[derive(ToSchema)]

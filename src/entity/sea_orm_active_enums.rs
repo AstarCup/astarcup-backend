@@ -30,3 +30,14 @@ pub enum UserGroup {
     #[sea_orm(string_value = "admin")]
     Admin,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "registration_status")]
+pub enum RegistrationStatus {
+    #[sea_orm(string_value = "pending")]
+    Pending,
+    #[sea_orm(string_value = "confirmed")]
+    Confirmed,
+    #[sea_orm(string_value = "rejected")]
+    Rejected,
+}

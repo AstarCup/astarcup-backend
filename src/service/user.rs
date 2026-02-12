@@ -4,8 +4,8 @@ use sea_orm::{
 };
 
 use crate::{
-    dto::user::{CreateUserRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams},
-    entity::{sea_orm_active_enums::UserGroup, user},
+    dto::user::{CreateUserRequest, UpdateApprovedRequest, UpdateRegistrationStatusRequest, UpdateSeasonRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams},
+    entity::{sea_orm_active_enums::{RegistrationStatus, UserGroup}, user},
     error::{AppError, Result},
 };
 
@@ -81,6 +81,7 @@ impl UserService {
             approved: Set(None),
             user_group: Set(UserGroup::Player),
             season: Set(None),
+            registration_status: Set(Some(RegistrationStatus::Pending)),
             gu_server_user_id: Set(None),
             gu_server_username: Set(None),
             created_at: Set(now),
@@ -162,5 +163,48 @@ impl UserService {
             .filter(user::Column::UserGroup.eq(UserGroup::Admin))
             .count(&self.db)
             .await?)
+    }
+
+    pub async fn update_registration_status(&self, id: i32, data: UpdateRegistrationStatusRequest) -> Result<user::Model> {
+        let status_enum = match data.registration_status.as_str() {
+            "pending" => RegistrationStatus::Pending,
+            "confirmed" => RegistrationStatus::Confirmed,
+            "rejected" => RegistrationStatus::Rejected,
+            _ => return Err(AppError::ValidationError("无效的注册状态".into())),
+        };
+
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.registration_status = Set(Some(status_enum));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn update_season(&self, id: i32, data: UpdateSeasonRequest) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.season = Set(Some(data.season));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn update_approved(&self, id: i32, data: UpdateApprovedRequest, is_admin: bool) -> Result<user::Model> {
+        if !is_admin {
+            return Err(AppError::Forbidden("只有管理员可以更新审批状态".into()));
+        }
+
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.approved = Set(Some(data.approved));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn update_season_from_settings(&self, id: i32, season: i32) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.season = Set(Some(season));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
     }
 }

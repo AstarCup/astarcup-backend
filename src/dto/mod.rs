@@ -9,15 +9,15 @@ pub mod tournament_settings;
 pub mod user;
 
 /// 通用响应结构
-#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct ApiResponse<T: utoipa::ToSchema> {
+#[derive(Debug, serde::Serialize)]
+pub struct ApiResponse<T> {
     pub success: bool,
     pub data: Option<T>,
     pub message: Option<String>,
     pub error: Option<String>,
 }
 
-impl<T: utoipa::ToSchema> ApiResponse<T> {
+impl<T> ApiResponse<T> {
     pub fn success(data: T) -> Self {
         Self {
             success: true,
@@ -55,6 +55,14 @@ impl<T: utoipa::ToSchema> ApiResponse<T> {
     }
 }
 
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct ApiResponseSchema<T: utoipa::ToSchema> {
+    pub success: bool,
+    pub data: Option<T>,
+    pub message: Option<String>,
+    pub error: Option<String>,
+}
+
 /// 分页请求参数
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 pub struct PaginationParams {
@@ -72,8 +80,8 @@ fn default_page_size() -> u64 {
     20
 }
 
-#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct PaginatedResponse<T: utoipa::ToSchema> {
+#[derive(Debug, serde::Serialize)]
+pub struct PaginatedResponse<T> {
     pub items: Vec<T>,
     pub total: u64,
     pub page: u64,
@@ -81,7 +89,7 @@ pub struct PaginatedResponse<T: utoipa::ToSchema> {
     pub total_pages: u64,
 }
 
-impl<T: utoipa::ToSchema> PaginatedResponse<T> {
+impl<T> PaginatedResponse<T> {
     pub fn new(items: Vec<T>, total: u64, page: u64, page_size: u64) -> Self {
         let total_pages = (total as f64 / page_size as f64).ceil() as u64;
         Self {
@@ -92,4 +100,13 @@ impl<T: utoipa::ToSchema> PaginatedResponse<T> {
             total_pages,
         }
     }
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct PaginatedResponseSchema<T: utoipa::ToSchema> {
+    pub items: Vec<T>,
+    pub total: u64,
+    pub page: u64,
+    pub page_size: u64,
+    pub total_pages: u64,
 }
