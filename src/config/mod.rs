@@ -24,6 +24,12 @@ pub struct Config {
 
     pub osu_redirect_uri: String,
 
+    pub gu_client_id: String,
+
+    pub gu_client_secret: String,
+
+    pub gu_redirect_uri: String,
+
     pub cors_origin: String,
 
     pub log_level: String,
@@ -64,6 +70,16 @@ impl Config {
             osu_redirect_uri: env::var("OSU_REDIRECT_URI").map_err(|_| {
                 crate::error::AppError::ConfigError("OSU_REDIRECT_URI未设置".into())
             })?,
+
+            gu_client_id: env::var("GU_CLIENT_ID")
+                .map_err(|_| crate::error::AppError::ConfigError("GU_CLIENT_ID未设置".into()))?,
+
+            gu_client_secret: env::var("GU_CLIENT_SECRET").map_err(|_| {
+                crate::error::AppError::ConfigError("GU_CLIENT_SECRET未设置".into())
+            })?,
+
+            gu_redirect_uri: env::var("GU_REDIRECT_URI")
+                .map_err(|_| crate::error::AppError::ConfigError("GU_REDIRECT_URI未设置".into()))?,
 
             cors_origin: env::var("CORS_ORIGIN")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string()),
