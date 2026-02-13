@@ -8,6 +8,7 @@ mod m20260211_140550_player_matchups;
 mod m20260211_140551_messages;
 mod m20260211_140552_map_comments;
 mod m20260211_140553_tournament_settings;
+mod m20260213_094956_add_refresh_tokens;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260211_140551_messages::Migration),
             Box::new(m20260211_140552_map_comments::Migration),
             Box::new(m20260211_140553_tournament_settings::Migration),
+            Box::new(m20260213_094956_add_refresh_tokens::Migration),
         ]
     }
 }

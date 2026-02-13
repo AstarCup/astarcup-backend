@@ -23,13 +23,16 @@ pub fn routes() -> Router<ServiceState> {
     Router::new()
         .route("/", get(get_users))
         .route("/", post(create_user))
-        .route("/{id}", get(get_user))
-        .route("/{id}", put(update_user))
-        .route("/{id}", delete(delete_user))
-        .route("/{id}/user-group", put(update_user_group))
-        .route("/{id}/registration-status", put(update_registration_status))
-        .route("/{id}/season", put(update_season))
-        .route("/{id}/approve", put(update_approved))
+        .route("/{osu_id}", get(get_user))
+        .route("/{osu_id}", put(update_user))
+        .route("/{osu_id}", delete(delete_user))
+        .route("/{osu_id}/user-group", put(update_user_group))
+        .route(
+            "/{osu_id}/registration-status",
+            put(update_registration_status),
+        )
+        .route("/{osu_id}/season", put(update_season))
+        .route("/{osu_id}/approve", put(update_approved))
 }
 
 #[utoipa::path(
@@ -37,7 +40,7 @@ pub fn routes() -> Router<ServiceState> {
     path = "/api/users",
     params(UserQueryParams),
     responses(
-        (status = 200, description = "获取用户列表成功", body = PaginatedUserResponse),
+        (status = 200, description = "获取osu玩家列表成功", body = PaginatedUserResponse),
         (status = 401, description = "未授权"),
         (status = 403, description = "权限不足"),
     ),
@@ -62,22 +65,25 @@ async fn get_users(
 
 #[utoipa::path(
     get,
-    path = "/api/users/{id}",
+    path = "/api/users/{osu_id}",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osuID")
     ),
     responses(
-        (status = 200, description = "获取用户成功", body = UserResponse),
-        (status = 404, description = "用户不存在"),
+        (status = 200, description = "获取osu玩家成功", body = UserResponse),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 async fn get_user(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
     let service = UserService::new(state.db);
-    let user = service.find_by_id(id).await?;
+    let user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
@@ -87,80 +93,83 @@ async fn get_user(
     path = "/api/users",
     request_body = CreateUserRequest,
     responses(
-        (status = 201, description = "创建用户成功", body = UserResponse),
+        (status = 201, description = "创建osu玩家成功", body = UserResponse),
         (status = 400, description = "请求参数错误"),
         (status = 401, description = "未授权"),
     ),
     tag = "users"
 )]
 async fn create_user() -> Result<Json<ApiResponse<UserResponse>>> {
-    // 用户创建将通过OAuth回调处理
+    // osu玩家创建将通过OAuth回调处理
     Err(crate::error::AppError::BusinessError(
-        "请通过OAuth注册用户".into(),
+        "请通过OAuth注册osu玩家".into(),
     ))
 }
 
 #[utoipa::path(
     put,
-    path = "/api/users/{id}",
+    path = "/api/users/{osu_id}",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osu玩家ID")
     ),
     request_body = UpdateUserRequest,
     responses(
-        (status = 200, description = "更新用户成功", body = UserResponse),
+        (status = 200, description = "更新osu玩家成功", body = UserResponse),
         (status = 400, description = "请求参数错误"),
         (status = 401, description = "未授权"),
         (status = 403, description = "权限不足"),
-        (status = 404, description = "用户不存在"),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 #[axum::debug_handler]
 async fn update_user(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
     auth_user: AuthUser,
     Json(data): Json<UpdateUserRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
-    // 检查是否为管理员，或者是否更新自己的信息
-    // 注意：这里需要从数据库获取用户的osu_id来匹配
-    // 暂时简化处理，实际项目中需要查询数据库
+    let service = UserService::new(state.db);
+
+    // 获取要更新的osu玩家信息
+    let target_user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
+
+    // 检查权限：管理员或osu玩家本人可以更新
     let is_admin = auth_user.user_group == "admin";
-    let is_self = auth_user.osu_id == id.to_string(); // 这里需要根据实际情况调整
+    let is_self = auth_user.osu_id == target_user.osu_id;
 
     if !is_admin && !is_self {
-        return Err(crate::error::AppError::Forbidden(
-            "只有管理员或用户本人可以更新用户信息".into(),
-        ));
+        return Err(crate::error::AppError::Forbidden("权限错误".into()));
     }
 
-    let service = UserService::new(state.db);
-    let user = service.update(id, data).await?;
+    let user = service.update(target_user.id, data).await?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
 
 #[utoipa::path(
     put,
-    path = "/api/users/{id}/user-group",
+    path = "/api/users/{osu_id}/user-group",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osuID")
     ),
     request_body = UpdateUserGroupRequest,
     responses(
-        (status = 200, description = "更新用户组成功", body = UserResponse),
+        (status = 200, description = "更新osu玩家组成功", body = UserResponse),
         (status = 400, description = "请求参数错误"),
         (status = 401, description = "未授权"),
         (status = 403, description = "权限不足"),
-        (status = 404, description = "用户不存在"),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 #[axum::debug_handler]
 async fn update_user_group(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
     user: AuthUser,
     Json(data): Json<UpdateUserGroupRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
@@ -168,96 +177,121 @@ async fn update_user_group(
     require_admin(&user)?;
 
     let service = UserService::new(state.db);
-    let user = service.update_user_group(id, data).await?;
+    let target_user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
+
+    let user = service.update_user_group(target_user.id, data).await?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
 
 #[utoipa::path(
     delete,
-    path = "/api/users/{id}",
+    path = "/api/users/{osu_id}",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osuID")
     ),
     responses(
-        (status = 200, description = "删除用户成功"),
+        (status = 200, description = "删除osu玩家成功"),
         (status = 401, description = "未授权"),
         (status = 403, description = "权限不足"),
-        (status = 404, description = "用户不存在"),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 async fn delete_user(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
     user: AuthUser,
 ) -> Result<Json<ApiResponse<()>>> {
     // 检查是否为管理员
     require_admin(&user)?;
 
     let service = UserService::new(state.db);
-    service.delete(id).await?;
+    let target_user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
 
-    Ok(Json(ApiResponse::success_with_message((), "用户删除成功")))
+    service.delete(target_user.id).await?;
+
+    Ok(Json(ApiResponse::success_with_message(
+        (),
+        "osu玩家删除成功",
+    )))
 }
 
 #[utoipa::path(
     put,
-    path = "/api/users/{id}/registration-status",
+    path = "/api/users/{osu_id}/registration-status",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osuID")
     ),
     request_body = UpdateRegistrationStatusRequest,
     responses(
         (status = 200, description = "更新注册状态成功", body = UserResponse),
         (status = 400, description = "请求参数错误"),
         (status = 401, description = "未授权"),
-        (status = 404, description = "用户不存在"),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 async fn update_registration_status(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
     Json(data): Json<UpdateRegistrationStatusRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
     let service = UserService::new(state.db);
-    let user = service.update_registration_status(id, data).await?;
+    let target_user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
+
+    let user = service
+        .update_registration_status(target_user.id, data)
+        .await?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
 
 #[utoipa::path(
     put,
-    path = "/api/users/{id}/season",
+    path = "/api/users/{osu_id}/season",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osuID")
     ),
     request_body = UpdateSeasonRequest,
     responses(
         (status = 200, description = "更新赛季成功", body = UserResponse),
         (status = 400, description = "请求参数错误"),
         (status = 401, description = "未授权"),
-        (status = 404, description = "用户不存在"),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 async fn update_season(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
     Json(data): Json<UpdateSeasonRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
     let service = UserService::new(state.db);
-    let user = service.update_season(id, data).await?;
+    let target_user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
+
+    let user = service.update_season(target_user.id, data).await?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
 
 #[utoipa::path(
     put,
-    path = "/api/users/{id}/approve",
+    path = "/api/users/{osu_id}/approve",
     params(
-        ("id" = i32, Path, description = "用户ID")
+        ("osu_id" = String, Path, description = "osuID")
     ),
     request_body = UpdateApprovedRequest,
     responses(
@@ -265,14 +299,14 @@ async fn update_season(
         (status = 400, description = "请求参数错误"),
         (status = 401, description = "未授权"),
         (status = 403, description = "权限不足"),
-        (status = 404, description = "用户不存在"),
+        (status = 404, description = "osu玩家不存在"),
     ),
     tag = "users"
 )]
 #[axum::debug_handler]
 async fn update_approved(
     State(state): State<ServiceState>,
-    Path(id): Path<i32>,
+    Path(osu_id): Path<String>,
     user: AuthUser,
     Json(data): Json<UpdateApprovedRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>> {
@@ -280,7 +314,12 @@ async fn update_approved(
     require_admin(&user)?;
 
     let service = UserService::new(state.db);
-    let user = service.update_approved(id, data, true).await?;
+    let target_user = service
+        .find_by_osu_id(&osu_id)
+        .await?
+        .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
+
+    let user = service.update_approved(target_user.id, data, true).await?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }

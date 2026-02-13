@@ -1,3 +1,4 @@
+use crate::middleware::auth::AuthUser;
 use axum::{
     Json, Router,
     extract::{Query, State},
@@ -32,6 +33,11 @@ pub fn routes() -> Router<ServiceState> {
 struct OsuCallbackQuery {
     code: String,
     state: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshTokenQuery {
+    server: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,7 +184,13 @@ async fn osu_callback(
                 approved: None,
                 season: None,
             };
-            user_service.update(existing.id, update_request).await?
+            let updated_user = user_service.update(existing.id, update_request).await?;
+
+            // 保存 OSU refresh_token
+            user_service
+                .update_osu_refresh_token(updated_user.id, token_response.refresh_token.clone())
+                .await?;
+            updated_user
         }
         None => {
             // 创建新用户
@@ -190,7 +202,13 @@ async fn osu_callback(
                 country: user_data.country.as_ref().map(|c| c.code.clone()),
                 country_rank: user_data.statistics.as_ref().and_then(|s| s.country_rank),
             };
-            user_service.create(user_data.id, create_request).await?
+            let new_user = user_service.create(user_data.id, create_request).await?;
+
+            // 保存 OSU refresh_token
+            user_service
+                .update_osu_refresh_token(new_user.id, token_response.refresh_token.clone())
+                .await?;
+            new_user
         }
     };
 
@@ -217,20 +235,158 @@ async fn osu_callback(
 #[utoipa::path(
     get,
     path = "/api/auth/refresh",
+    params(
+        ("server" = Option<String>, Query, description = "服务器类型，可选值：osu, gu，默认为osu"),
+    ),
     responses(
         (status = 200, description = "令牌刷新成功"),
-        (status = 401, description = "未授权"),
+        (status = 400, description = "请求参数错误"),
+        (status = 401, description = "未授权或refresh_token过期"),
         (status = 500, description = "内部服务器错误"),
     ),
     tag = "auth"
 )]
-async fn refresh_token() -> Result<Json<ApiResponse<AuthResponse>>> {
-    // 实现令牌刷新逻辑
-    // 这里需要从请求中获取refresh_token，然后调用OSU API刷新令牌
-    // 暂时返回未实现
-    Err(crate::error::AppError::NotImplemented(
-        "Token refresh not implemented".into(),
-    ))
+async fn refresh_token(
+    auth_user: AuthUser,
+    Query(params): Query<RefreshTokenQuery>,
+    State(state): State<ServiceState>,
+) -> Result<Json<ApiResponse<AuthResponse>>> {
+    let server = params.server.unwrap_or_else(|| "osu".to_string());
+
+    if server != "osu" && server != "gu" {
+        return Err(crate::error::AppError::ValidationError(
+            "server参数必须是'osu'或'gu'".into(),
+        ));
+    }
+
+    let user_service = UserService::new(state.db);
+
+    // 根据服务器类型获取对应的refresh_token
+    let refresh_token = match server.as_str() {
+        "osu" => user_service.get_osu_refresh_token(auth_user.id).await?,
+        "gu" => user_service.get_gu_refresh_token(auth_user.id).await?,
+        _ => unreachable!(),
+    };
+
+    let refresh_token = refresh_token.ok_or_else(|| {
+        crate::error::AppError::Unauthorized(format!("{} refresh_token不存在", server))
+    })?;
+
+    // 根据服务器类型调用相应的API刷新令牌
+    let (client_id, client_secret, token_url, api_url) = match server.as_str() {
+        "osu" => (
+            env::var("OSU_CLIENT_ID").expect("OSU_CLIENT_ID not set"),
+            env::var("OSU_CLIENT_SECRET").expect("OSU_CLIENT_SECRET not set"),
+            "https://osu.ppy.sh/oauth/token",
+            "https://osu.ppy.sh/api/v2/me",
+        ),
+        "gu" => (
+            env::var("GU_CLIENT_ID").expect("GU_CLIENT_ID not set"),
+            env::var("GU_CLIENT_SECRET").expect("GU_CLIENT_SECRET not set"),
+            "https://lazer-api.g0v0.top/oauth/token",
+            "https://lazer-api.g0v0.top/api/v2/me",
+        ),
+        _ => unreachable!(),
+    };
+
+    let client = Client::new();
+
+    // 使用refresh_token获取新的访问令牌
+    let token_response = client
+        .post(token_url)
+        .json(&serde_json::json!({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            // 如果refresh_token过期，返回401提示重新登录
+            if e.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
+                crate::error::AppError::Unauthorized(format!(
+                    "{} refresh_token已过期，请重新登录",
+                    server
+                ))
+            } else {
+                crate::error::AppError::ExternalApiError(format!("Failed to refresh token: {}", e))
+            }
+        })?
+        .json::<OsuTokenResponse>()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!(
+                "Failed to parse token response: {}",
+                e
+            ))
+        })?;
+
+    // 获取用户信息
+    let user_data = client
+        .get(api_url)
+        .header(
+            "Authorization",
+            format!("Bearer {}", token_response.access_token),
+        )
+        .send()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!("Failed to get user info: {}", e))
+        })?
+        .json::<OsuUserData>()
+        .await
+        .map_err(|e| {
+            crate::error::AppError::ExternalApiError(format!("Failed to parse user info: {}", e))
+        })?;
+
+    // 更新用户信息
+    let update_request = crate::dto::user::UpdateUserRequest {
+        username: Some(user_data.username.clone()),
+        avatar_url: user_data.avatar_url,
+        pp: user_data.statistics.as_ref().and_then(|s| s.pp),
+        global_rank: user_data.statistics.as_ref().and_then(|s| s.global_rank),
+        country: user_data.country.as_ref().map(|c| c.code.clone()),
+        country_rank: user_data.statistics.as_ref().and_then(|s| s.country_rank),
+        approved: None,
+        season: None,
+    };
+
+    let user = user_service.update(auth_user.id, update_request).await?;
+
+    // 更新数据库中的refresh_token
+    match server.as_str() {
+        "osu" => {
+            user_service
+                .update_osu_refresh_token(auth_user.id, token_response.refresh_token.clone())
+                .await?;
+        }
+        "gu" => {
+            user_service
+                .update_gu_refresh_token(auth_user.id, token_response.refresh_token.clone())
+                .await?;
+        }
+        _ => unreachable!(),
+    }
+
+    // 生成新的JWT令牌
+    let osu_id = user.osu_id.clone();
+    let user_group_str = match user.user_group {
+        crate::entity::sea_orm_active_enums::UserGroup::Player => "player",
+        crate::entity::sea_orm_active_enums::UserGroup::Admin => "admin",
+    };
+    let jwt_token =
+        crate::utils::jwt::generate_token(osu_id, user_group_str.to_string()).map_err(|e| {
+            crate::error::AppError::InternalError(format!("Failed to generate token: {}", e))
+        })?;
+
+    let auth_response = AuthResponse {
+        access_token: jwt_token,
+        refresh_token: token_response.refresh_token,
+        user: crate::dto::user::UserResponse::from(user),
+    };
+
+    Ok(Json(ApiResponse::success(auth_response)))
 }
 
 #[utoipa::path(
@@ -238,13 +394,25 @@ async fn refresh_token() -> Result<Json<ApiResponse<AuthResponse>>> {
     path = "/api/auth/logout",
     responses(
         (status = 200, description = "登出成功"),
+        (status = 401, description = "未授权"),
     ),
     tag = "auth"
 )]
-async fn logout() -> Result<Json<ApiResponse<()>>> {
-    // 实现登出逻辑
-    // 这里需要清除客户端的令牌
-    Ok(Json(ApiResponse::success_with_message((), "登出成功")))
+async fn logout(
+    auth_user: AuthUser,
+    State(state): State<ServiceState>,
+) -> Result<Json<ApiResponse<()>>> {
+    // 清除用户的refresh_token
+    let user_service = UserService::new(state.db);
+
+    // 清除所有refresh_token（OSU和GU）
+    user_service.clear_all_refresh_tokens(auth_user.id).await?;
+
+    // 返回成功消息
+    Ok(Json(ApiResponse::success_with_message(
+        (),
+        "登出成功，已清除OSU和GU refresh_token",
+    )))
 }
 
 #[utoipa::path(
@@ -340,6 +508,14 @@ async fn gu_callback(
             let updated_user_with_gu_info = user_service
                 .update_gu_server_info(updated_user.id, gu_user_id, username.clone())
                 .await?;
+
+            // 保存 GU refresh_token
+            user_service
+                .update_gu_refresh_token(
+                    updated_user_with_gu_info.id,
+                    token_response.refresh_token.clone(),
+                )
+                .await?;
             updated_user_with_gu_info
         }
         None => {
@@ -358,6 +534,14 @@ async fn gu_callback(
             let gu_user_id = user_id.parse::<i32>().unwrap_or(0);
             let new_user_with_gu_info = user_service
                 .update_gu_server_info(new_user.id, gu_user_id, username.clone())
+                .await?;
+
+            // 保存 GU refresh_token
+            user_service
+                .update_gu_refresh_token(
+                    new_user_with_gu_info.id,
+                    token_response.refresh_token.clone(),
+                )
                 .await?;
             new_user_with_gu_info
         }

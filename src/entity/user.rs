@@ -25,6 +25,8 @@ pub struct Model {
     pub registration_status: Option<RegistrationStatus>,
     pub gu_server_user_id: Option<i32>,
     pub gu_server_username: Option<String>,
+    pub osu_refresh_token: Option<String>,
+    pub gu_refresh_token: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

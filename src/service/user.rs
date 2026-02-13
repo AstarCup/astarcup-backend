@@ -4,8 +4,14 @@ use sea_orm::{
 };
 
 use crate::{
-    dto::user::{CreateUserRequest, UpdateApprovedRequest, UpdateRegistrationStatusRequest, UpdateSeasonRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams},
-    entity::{sea_orm_active_enums::{RegistrationStatus, UserGroup}, user},
+    dto::user::{
+        CreateUserRequest, UpdateApprovedRequest, UpdateRegistrationStatusRequest,
+        UpdateSeasonRequest, UpdateUserGroupRequest, UpdateUserRequest, UserQueryParams,
+    },
+    entity::{
+        sea_orm_active_enums::{RegistrationStatus, UserGroup},
+        user,
+    },
     error::{AppError, Result},
 };
 
@@ -165,7 +171,11 @@ impl UserService {
             .await?)
     }
 
-    pub async fn update_registration_status(&self, id: i32, data: UpdateRegistrationStatusRequest) -> Result<user::Model> {
+    pub async fn update_registration_status(
+        &self,
+        id: i32,
+        data: UpdateRegistrationStatusRequest,
+    ) -> Result<user::Model> {
         let status_enum = match data.registration_status.as_str() {
             "pending" => RegistrationStatus::Pending,
             "confirmed" => RegistrationStatus::Confirmed,
@@ -188,7 +198,12 @@ impl UserService {
         Ok(user.update(&self.db).await?)
     }
 
-    pub async fn update_approved(&self, id: i32, data: UpdateApprovedRequest, is_admin: bool) -> Result<user::Model> {
+    pub async fn update_approved(
+        &self,
+        id: i32,
+        data: UpdateApprovedRequest,
+        is_admin: bool,
+    ) -> Result<user::Model> {
         if !is_admin {
             return Err(AppError::Forbidden("只有管理员可以更新审批状态".into()));
         }
@@ -208,10 +223,74 @@ impl UserService {
         Ok(user.update(&self.db).await?)
     }
 
-    pub async fn update_gu_server_info(&self, id: i32, gu_user_id: i32, gu_username: String) -> Result<user::Model> {
+    pub async fn update_gu_server_info(
+        &self,
+        id: i32,
+        gu_user_id: i32,
+        gu_username: String,
+    ) -> Result<user::Model> {
         let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
         user.gu_server_user_id = Set(Some(gu_user_id));
         user.gu_server_username = Set(Some(gu_username));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn update_osu_refresh_token(
+        &self,
+        id: i32,
+        refresh_token: String,
+    ) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.osu_refresh_token = Set(Some(refresh_token));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn update_gu_refresh_token(
+        &self,
+        id: i32,
+        refresh_token: String,
+    ) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.gu_refresh_token = Set(Some(refresh_token));
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn get_osu_refresh_token(&self, id: i32) -> Result<Option<String>> {
+        let user = self.find_by_id(id).await?;
+        Ok(user.osu_refresh_token)
+    }
+
+    pub async fn get_gu_refresh_token(&self, id: i32) -> Result<Option<String>> {
+        let user = self.find_by_id(id).await?;
+        Ok(user.gu_refresh_token)
+    }
+
+    pub async fn clear_osu_refresh_token(&self, id: i32) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.osu_refresh_token = Set(None);
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn clear_gu_refresh_token(&self, id: i32) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.gu_refresh_token = Set(None);
+        user.updated_at = Set(chrono::Utc::now());
+
+        Ok(user.update(&self.db).await?)
+    }
+
+    pub async fn clear_all_refresh_tokens(&self, id: i32) -> Result<user::Model> {
+        let mut user: user::ActiveModel = self.find_by_id(id).await?.into();
+        user.osu_refresh_token = Set(None);
+        user.gu_refresh_token = Set(None);
         user.updated_at = Set(chrono::Utc::now());
 
         Ok(user.update(&self.db).await?)

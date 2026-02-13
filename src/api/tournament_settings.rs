@@ -46,7 +46,7 @@ async fn get_tournament_settings(
     State(state): State<ServiceState>,
     Query(params): Query<TournamentSettingQueryParams>,
 ) -> Result<Json<ApiResponse<PaginatedTournamentSettingsResponse>>> {
-    let service = TournamentSettingService::new(state.db);
+    let service = TournamentSettingService::new(state);
     let page = params.page.unwrap_or(1);
     let page_size = params.page_size.unwrap_or(20);
     let (settings, total) = service.find_all(params).await?;
@@ -96,10 +96,10 @@ async fn update_tournament_settings(
     // 验证用户是否为admin
     require_admin(&auth_user)?;
 
-    let service = TournamentSettingService::new(state.db);
+    let service = TournamentSettingService::new(state);
 
     // 检查是否存在设置，如果不存在则初始化
-    let settings = match service.get_current_settings().await? {
+    let settings = match service.get_current_settings_cached().await? {
         Some(existing) => {
             // 更新现有设置
             service.update(existing.id, data).await?
