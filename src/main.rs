@@ -1,6 +1,4 @@
-use std::sync::Arc;
 
-use axum::Router;
 use config::Config;
 use sea_orm::Database;
 use service::ServiceState;

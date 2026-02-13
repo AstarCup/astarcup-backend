@@ -1,7 +1,6 @@
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::StatusCode,
     response::Redirect,
     routing::get,
 };
@@ -167,7 +166,7 @@ async fn osu_callback(
     let existing_user = user_service.find_by_osu_id(&user_data.id).await?;
 
     let user = match existing_user {
-        Some(mut existing) => {
+        Some(existing) => {
             // 更新现有用户
             let update_request = crate::dto::user::UpdateUserRequest {
                 username: Some(user_data.username),

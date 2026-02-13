@@ -3,7 +3,6 @@ use axum::{
     extract::{Query, State},
     routing::{get, put},
 };
-use utoipa::ToSchema;
 
 use crate::{
     dto::{
