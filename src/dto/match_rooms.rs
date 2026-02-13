@@ -1,5 +1,5 @@
 use sea_orm::prelude::{Date, Time};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use utoipa::ToSchema;
 
 #[derive(Debug, Deserialize, ToSchema)]
