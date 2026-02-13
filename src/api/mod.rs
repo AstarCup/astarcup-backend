@@ -27,6 +27,7 @@ pub fn configure_routes() -> Router<ServiceState> {
         auth::logout,
         user::get_users,
         user::get_user,
+        user::get_current_user,
         user::update_user,
         user::update_user_group,
         user::delete_user,

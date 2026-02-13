@@ -23,6 +23,7 @@ pub fn routes() -> Router<ServiceState> {
     Router::new()
         .route("/", get(get_users))
         .route("/", post(create_user))
+        .route("/me", get(get_current_user))
         .route("/{osu_id}", get(get_user))
         .route("/{osu_id}", put(update_user))
         .route("/{osu_id}", delete(delete_user))
@@ -84,6 +85,31 @@ async fn get_user(
         .find_by_osu_id(&osu_id)
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound(format!("osu玩家 {} 不存在", osu_id)))?;
+
+    Ok(Json(ApiResponse::success(UserResponse::from(user))))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/users/me",
+    responses(
+        (status = 200, description = "获取当前玩家信息成功", body = UserResponse),
+        (status = 401, description = "未授权"),
+        (status = 404, description = "玩家不存在"),
+    ),
+    tag = "users"
+)]
+async fn get_current_user(
+    State(state): State<ServiceState>,
+    auth_user: AuthUser,
+) -> Result<Json<ApiResponse<UserResponse>>> {
+    let service = UserService::new(state.db);
+    let user = service
+        .find_by_osu_id(&auth_user.osu_id)
+        .await?
+        .ok_or_else(|| {
+            crate::error::AppError::NotFound(format!("玩家 {} 不存在", auth_user.osu_id))
+        })?;
 
     Ok(Json(ApiResponse::success(UserResponse::from(user))))
 }
