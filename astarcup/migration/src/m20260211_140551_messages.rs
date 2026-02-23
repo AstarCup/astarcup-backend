@@ -1,5 +1,5 @@
 use sea_orm_migration::{prelude::*, schema::*};
-
+use crate::extension::postgres::Type;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -7,12 +7,20 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .create_type()
-            .create_enum("type", vec!["match_invitation", "match_response", "system"])
+            .create_type(
+                Type::create()
+                    .as_enum(Alias::new("type"))
+                    .values([Alias::new("match_invitation"), Alias::new("match_response"), Alias::new("system")])
+                    .to_owned(),
+            )
             .await?;
         manager
-            .create_type()
-            .create_enum("status", vec!["available", "scheduled", "completed"])
+            .create_type(
+                Type::create()
+                    .as_enum(Alias::new("status"))
+                    .values([Alias::new("available"),Alias::new("scheduled"),Alias::new("completed")])
+                    .to_owned(),
+            )
             .await?;
         manager
             .create_table(
@@ -30,19 +38,18 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Messages::ReceiverOsuId).string().not_null())
                     .col(
                         ColumnDef::new(Messages::Type)
-                            .enumeration(
-                                "type",
-                                vec!["match_invitation", "match_response", "system"],
-                            )
-                            .null(),
+                            .custom(Alias::new("type"))
+                            .default("match_invitation")
+                            .not_null(),
                     )
                     .col(ColumnDef::new(Messages::Title).string().not_null())
                     .col(ColumnDef::new(Messages::Content).text().not_null())
                     .col(ColumnDef::new(Messages::RelatedMatchupId).integer().null())
                     .col(
                         ColumnDef::new(Messages::Status)
-                            .enumeration("status", vec!["available", "scheduled", "completed"])
-                            .null(),
+                            .custom(Alias::new("matchStatus"))
+                            .default("available")
+                            .not_null(),
                     )
                     .col(ColumnDef::new(Messages::ResponseAction).string().null())
                     .col(ColumnDef::new(Messages::ResponseTime).timestamp().null())
@@ -68,16 +75,12 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_type(
-                sea_orm_migration::prelude::Enum::drop()
-                    .enum_name("type")
-                    .to_owned(),
+               Type::drop().name(Alias::new("type")).to_owned(),
             )
             .await?;
         manager
             .drop_type(
-                sea_orm_migration::prelude::Enum::drop()
-                    .enum_name("status")
-                    .to_owned(),
+                Type::drop().name(Alias::new("matchStatus")).to_owned(),
             )
             .await?;
         manager

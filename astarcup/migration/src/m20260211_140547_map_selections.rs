@@ -8,22 +8,6 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .create_type(
-                Type::create()
-                    .as_enum(Alias::new("mode"))
-                    .values([Alias::new("std"),Alias::new("taiko"),Alias::new("ctb"),Alias::new("mania")])
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_type(
-                Type::create()
-                    .as_enum(Alias::new("category"))
-                    .values([Alias::new("qua"),Alias::new("ro16"),Alias::new("qf"),Alias::new("sf"),Alias::new("f"),Alias::new("gf")])
-                    .to_owned(),
-            )
-            .await?;
-        manager
             .create_table(
                 Table::create()
                     .table(MapSelections::Table)
