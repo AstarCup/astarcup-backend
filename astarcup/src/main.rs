@@ -2,6 +2,8 @@ mod extensions;
 mod middlewares;
 mod routes;
 mod utils;
+mod entity;
+mod error;
 
 use sea_orm::{sqlx::database, Database, DatabaseConnection, DbErr};
 use std::net::SocketAddr;
@@ -26,6 +28,7 @@ async fn main() {
 
     // Run app on local server
     let address = SocketAddr::from((host, port));
+    let listener = tokio::net::TcpListener::bind(address).await.unwrap();
     print_banner();
 
     println!(
@@ -35,10 +38,7 @@ async fn main() {
     );
     // start server
     connect_database().await.unwrap();
-    axum::Server::bind(&address)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(listener,app).await.unwrap();
 }
 fn print_banner() {
     println!(r"     _        _              ____            ");

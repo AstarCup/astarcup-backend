@@ -39,3 +39,7 @@
     ```sh
     cargo run -- status
     ```
+# Generate entity files of database
+```sh
+sea-orm-cli generate entity --output-dir ../src/entity/
+```

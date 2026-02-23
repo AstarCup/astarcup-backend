@@ -68,6 +68,9 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .drop_table(Table::drop().table(PlayerMatchups::Table).to_owned())
+            .await?;
+        manager
             .drop_type(
                 Type::drop().name(Alias::new("category")).if_exists().to_owned(),
             )
@@ -76,10 +79,8 @@ impl MigrationTrait for Migration {
             .drop_type(
                 Type::drop().name(Alias::new("match_status")).if_exists().to_owned(),
             )
-            .await?;
-        manager
-            .drop_table(Table::drop().table(PlayerMatchups::Table).to_owned())
             .await
+
     }
 }
 
