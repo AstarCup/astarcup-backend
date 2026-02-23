@@ -1,4 +1,5 @@
 use sea_orm_migration::{prelude::*, schema::*};
+use sea_query::extension::postgres::Type;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -6,6 +7,21 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager.create_type(
+            Type::create()
+                .as_enum(Alias::new("userstate"))
+                .values([Alias::new("active"),Alias::new("approved"),Alias::new("banned"),Alias::new("ignored")])
+                .to_owned(),
+            )
+            .await?;
+        manager
+            .create_type(
+                Type::create()
+                    .as_enum(Alias::new("usergroup"))
+                    .values([Alias::new("player"),Alias::new("admin"),Alias::new("mapooler"),Alias::new("tester")])
+                    .to_owned(),
+            )
+            .await?;
         manager
             .create_table(
                 Table::create()
@@ -18,7 +34,12 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(User::OsuId).string().not_null().unique_key())
+                    .col(
+                        ColumnDef::new(User::OsuId)
+                            .integer()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(
                         ColumnDef::new(User::Username)
                             .string()
@@ -33,19 +54,13 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(User::CountryRank).integer().null())
                     .col(
                         ColumnDef::new(User::UserState)
-                            .enumeration(
-                                "userstate",
-                                vec!["active", "approved", "banned", "ignored"],
-                            )
+                            .custom(Alias::new("userstate"))
                             .not_null()
                             .default("active"),
                     )
                     .col(
                         ColumnDef::new(User::UserGroup)
-                            .enumeration(
-                                "usergroup",
-                                vec!["player", "admin", "mappooler", "tester"],
-                            )
+                            .custom(Alias::new("usergroup"))
                             .not_null()
                             .default("player"),
                     )
@@ -65,7 +80,6 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(ColumnDef::new(User::CreatedAt).timestamp().null())
                     .to_owned(),
             )
             .await?;
@@ -74,6 +88,8 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager.drop_type(Type::drop().name(Alias::new("userstate")).to_owned()).await?;
+        manager.drop_type(Type::drop().name(Alias::new("usergroup")).to_owned()).await?;
         manager
             .drop_table(Table::drop().table(User::Table).to_owned())
             .await
@@ -90,11 +106,14 @@ enum User {
     AvatarUrl,
     Pp,
     GlobalRank,
+    CountryCode,
+    CountryRank,
     UserState,
     UserGroup,
     Season,
     GuServerUserId,
     GuServerUsername,
+    GuServerBindAt,
     CreatedAt,
     UpdatedAt,
 }

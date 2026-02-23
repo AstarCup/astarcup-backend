@@ -7,6 +7,10 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .create_type()
+            .create_enum("status", vec!["available", "scheduled", "completed"])
+            .await?;
+        manager
             .create_table(
                 Table::create()
                     .table(MatchRooms::Table)
@@ -19,10 +23,8 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(MatchRooms::RoundNumber).integer().not_null())
-                    .col(ColumnDef::new(MatchRooms::MatchDate).date().not_null())
-                    .col(ColumnDef::new(MatchRooms::MatchTime).time().not_null())
+                    .col(ColumnDef::new(MatchRooms::MatchTime).timestamp().not_null())
                     .col(ColumnDef::new(MatchRooms::MatchNumber).integer().not_null())
-                    .col(ColumnDef::new(MatchRooms::MaxParticipants).integer().null())
                     .col(
                         ColumnDef::new(MatchRooms::Status)
                             .enumeration("status", vec!["available", "scheduled", "completed"])
@@ -51,6 +53,13 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_table(Table::drop().table(MatchRooms::Table).to_owned())
+            .await?;
+        manager
+            .drop_type(
+                sea_orm_migration::prelude::Enum::drop()
+                    .enum_name("status")
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -61,10 +70,8 @@ enum MatchRooms {
     Id,
     RoomName,
     RoundNumber,
-    MatchDate,
     MatchTime,
     MatchNumber,
-    MaxParticipants,
     Status,
     CreatedBy,
     CreatedAt,
