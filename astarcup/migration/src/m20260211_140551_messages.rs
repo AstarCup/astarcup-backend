@@ -1,4 +1,4 @@
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 use crate::extension::postgres::Type;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -94,9 +94,7 @@ enum Messages {
     Table,
     Id,
     SenderOsuId,
-    SenderUsername,
     ReceiverOsuId,
-    ReceiverUsername,
     Type,
     Title,
     Content,
