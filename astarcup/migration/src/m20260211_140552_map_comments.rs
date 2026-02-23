@@ -23,7 +23,7 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(MapComments::OsuId).string().not_null())
+                    .col(ColumnDef::new(MapComments::OsuId).integer().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .from(MapComments::Table, MapComments::OsuId)

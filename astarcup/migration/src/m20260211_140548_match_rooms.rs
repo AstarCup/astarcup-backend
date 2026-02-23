@@ -24,7 +24,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(MatchRooms::MatchNumber).integer().not_null())
                     .col(
                         ColumnDef::new(MatchRooms::Status)
-                            .custom(Alias::new("matchStatus"))
+                            .custom(Alias::new("match_status"))
                             .default("available")
                             .null(),
                     )
@@ -49,7 +49,7 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager.drop_type(Type::drop().name(Alias::new("matchStatus")).to_owned()).await?;
+        manager.drop_type(Type::drop().name(Alias::new("match_status")).to_owned()).await?;
         manager
             .drop_table(Table::drop().table(MatchRooms::Table).to_owned())
             .await

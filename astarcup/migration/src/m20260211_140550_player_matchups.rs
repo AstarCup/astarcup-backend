@@ -43,7 +43,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PlayerMatchups::Status)
-                            .custom(Alias::new("matchStatus"))
+                            .custom(Alias::new("match_status"))
                             .default("available")
                             .not_null(),
                     )
@@ -74,7 +74,7 @@ impl MigrationTrait for Migration {
             .await?;
         manager
             .drop_type(
-                Type::drop().name(Alias::new("matchStatus")).if_exists().to_owned(),
+                Type::drop().name(Alias::new("match_status")).if_exists().to_owned(),
             )
             .await?;
         manager
