@@ -1,4 +1,5 @@
 use sea_orm_migration::{prelude::*, schema::*};
+use crate::extension::postgres::Type;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -6,10 +7,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .create_type()
-            .create_enum("status", vec!["available", "scheduled", "completed"])
-            .await?;
         manager
             .create_table(
                 Table::create()
@@ -27,7 +24,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(MatchRooms::MatchNumber).integer().not_null())
                     .col(
                         ColumnDef::new(MatchRooms::Status)
-                            .enumeration("status", vec!["available", "scheduled", "completed"])
+                            .custom(Alias::new("matchStatus"))
+                            .default("available")
                             .null(),
                     )
                     .col(ColumnDef::new(MatchRooms::CreatedBy).string().not_null())
@@ -51,15 +49,9 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager.drop_type(Type::drop().name(Alias::new("matchStatus")).to_owned()).await?;
         manager
             .drop_table(Table::drop().table(MatchRooms::Table).to_owned())
-            .await?;
-        manager
-            .drop_type(
-                sea_orm_migration::prelude::Enum::drop()
-                    .enum_name("status")
-                    .to_owned(),
-            )
             .await
     }
 }

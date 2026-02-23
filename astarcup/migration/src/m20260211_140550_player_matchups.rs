@@ -1,4 +1,5 @@
 use sea_orm_migration::{prelude::*, schema::*};
+use crate::extension::postgres::Type;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -6,14 +7,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .create_type()
-            .create_enum("category", vec!["qua", "ro16", "qf", "sf", "f", "gf"])
-            .await?;
-        manager
-            .create_type()
-            .create_enum("status", vec!["available", "scheduled", "completed"])
-            .await?;
         manager
             .create_table(
                 Table::create()
@@ -34,9 +27,9 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PlayerMatchups::Category)
-                            .enumeration("category", vec!["qua", "ro16", "qf", "sf", "f", "gf"])
+                            .custom(Alias::new("category"))
+                            .default("qua")
                             .not_null()
-                            .default("qua"),
                     )
                     .col(
                         ColumnDef::new(PlayerMatchups::PlayerRedOsuId)
@@ -50,8 +43,9 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(PlayerMatchups::Status)
-                            .enumeration("status", vec!["available", "scheduled", "completed"])
-                            .null(),
+                            .custom(Alias::new("matchStatus"))
+                            .default("available")
+                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(PlayerMatchups::CreatedAt)
@@ -75,16 +69,12 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_type(
-                sea_orm_migration::prelude::Enum::drop()
-                    .enum_name("category")
-                    .to_owned(),
+                Type::drop().name(Alias::new("category")).if_exists().to_owned(),
             )
             .await?;
         manager
             .drop_type(
-                sea_orm_migration::prelude::Enum::drop()
-                    .enum_name("status")
-                    .to_owned(),
+                Type::drop().name(Alias::new("matchStatus")).if_exists().to_owned(),
             )
             .await?;
         manager

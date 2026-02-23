@@ -1,4 +1,5 @@
 use sea_orm_migration::{prelude::*, schema::*};
+use crate::extension::postgres::Type;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -7,17 +8,19 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .create_type()
-            .create_enum(
-                "tournament_setting_key",
-                vec![
-                    "TournamentName",
-                    "MaxPpForRegistration",
-                    "MinPpForRegistration",
-                    "CurrentSeason",
-                    "CurrentSeasonStage",
-                    "MappoolVisible",
-                ],
+            .create_type(
+                Type::create()
+                    .as_enum(Alias::new("tournament_setting_key"))
+                    .values([
+                        Alias::new("TournamentName"),
+                        Alias::new("MaxPpForRegistration"),
+                        Alias::new("MinPpForRegistration"),
+                        Alias::new("CurrentSeason"),
+                        Alias::new("CurrentCategory"),
+                        Alias::new("MapPoolVisible"),
+                        Alias::new("CanRegister")
+                    ])
+                    .to_owned(),
             )
             .await?;
         manager
@@ -42,7 +45,7 @@ impl MigrationTrait for Migration {
                                     "MinPpForRegistration",
                                     "CurrentSeason",
                                     "CurrentSeasonStage",
-                                    "MappoolVisible",
+                                    "MapPoolVisible",
                                 ],
                             )
                             .not_null(),
@@ -62,9 +65,7 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .drop_type(
-                sea_orm_migration::prelude::Enum::drop()
-                    .enum_name("tournament_setting_key")
-                    .to_owned(),
+            Type::drop().name(Alias::new("tournament_setting_key")).to_owned(),
             )
             .await?;
         manager

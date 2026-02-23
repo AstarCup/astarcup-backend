@@ -67,7 +67,6 @@ enum MapComments {
     Id,
     MapSelectionId,
     OsuId,
-    Username,
     Comment,
     CreatedAt,
     UpdatedAt,
