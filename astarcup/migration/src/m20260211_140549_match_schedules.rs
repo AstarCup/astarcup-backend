@@ -1,5 +1,4 @@
 use sea_orm_migration::prelude::*;
-use crate::extension::postgres::Type;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -79,11 +78,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .drop_type(
-                Type::drop().name(Alias::new("match_status")).to_owned(),
-            )
-            .await?;
         manager
             .drop_table(Table::drop().table(MatchSchedules::Table).to_owned())
             .await

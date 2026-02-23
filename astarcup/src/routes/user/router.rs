@@ -7,6 +7,17 @@ pub(crate) async fn get_router() -> Router {
         .route("/", get(get_user_list))
         .route("/:user_id", get(find_user_by_id))
 }
+// create user
+
+async fn create_user() -> impl IntoResponse {
+    
+}
+
+// find user
+
+// delete user
+
+// update user
 
 async fn get_user_list() -> impl IntoResponse {
     let service = UserService::new();

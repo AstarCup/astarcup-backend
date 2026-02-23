@@ -129,11 +129,11 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager.drop_type(Type::drop().name(Alias::new("mode")).to_owned()).await?;
-        manager.drop_type(Type::drop().name(Alias::new("category")).to_owned()).await?;
         manager
             .drop_table(Table::drop().table(MapSelections::Table).to_owned())
-            .await
+            .await?;
+        manager.drop_type(Type::drop().name(Alias::new("mode")).to_owned()).await?;
+        manager.drop_type(Type::drop().name(Alias::new("category")).to_owned()).await
     }
 }
 

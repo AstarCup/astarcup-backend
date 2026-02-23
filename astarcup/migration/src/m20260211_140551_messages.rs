@@ -74,6 +74,9 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .drop_table(Table::drop().table(Messages::Table).to_owned())
+            .await?;
+        manager
             .drop_type(
                Type::drop().name(Alias::new("type")).to_owned(),
             )
@@ -82,9 +85,6 @@ impl MigrationTrait for Migration {
             .drop_type(
                 Type::drop().name(Alias::new("match_status")).to_owned(),
             )
-            .await?;
-        manager
-            .drop_table(Table::drop().table(Messages::Table).to_owned())
             .await
     }
 }
