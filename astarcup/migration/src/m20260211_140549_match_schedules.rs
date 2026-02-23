@@ -7,6 +7,10 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .create_type()
+            .create_enum("status", vec!["available", "scheduled", "completed"])
+            .await?;
+        manager
             .create_table(
                 Table::create()
                     .table(MatchSchedules::Table)
@@ -20,24 +24,24 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(MatchSchedules::RoomId).integer().not_null())
                     .col(
-                        ColumnDef::new(MatchSchedules::Player1OsuId)
-                            .string()
+                        ColumnDef::new(MatchSchedules::PlayerRedOsuId)
+                            .integer()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(MatchSchedules::Player1Username)
-                            .string()
-                            .not_null(),
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from(MatchSchedules::Table, MatchSchedules::PlayerRedOsuId)
+                            .to(User::Table, User::OsuId),
                     )
                     .col(
-                        ColumnDef::new(MatchSchedules::Player2OsuId)
-                            .string()
+                        ColumnDef::new(MatchSchedules::PlayerBlueOsuId)
+                            .integer()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(MatchSchedules::Player2Username)
-                            .string()
-                            .not_null(),
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from(MatchSchedules::Table, MatchSchedules::PlayerBlueOsuId)
+                            .to(User::Table, User::OsuId),
                     )
                     .col(ColumnDef::new(MatchSchedules::RedScore).integer().null())
                     .col(ColumnDef::new(MatchSchedules::BlueScore).integer().null())
@@ -79,6 +83,13 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .drop_type(
+                sea_orm_migration::prelude::Enum::drop()
+                    .enum_name("status")
+                    .to_owned(),
+            )
+            .await?;
+        manager
             .drop_table(Table::drop().table(MatchSchedules::Table).to_owned())
             .await
     }
@@ -89,10 +100,8 @@ enum MatchSchedules {
     Table,
     Id,
     RoomId,
-    Player1OsuId,
-    Player1Username,
-    Player2OsuId,
-    Player2Username,
+    PlayerRedOsuId,
+    PlayerBlueOsuId,
     RedScore,
     BlueScore,
     Status,
@@ -107,4 +116,9 @@ enum MatchSchedules {
 enum MatchRooms {
     Table,
     Id,
+}
+#[derive(DeriveIden)]
+enum User {
+    Table,
+    OsuId,
 }

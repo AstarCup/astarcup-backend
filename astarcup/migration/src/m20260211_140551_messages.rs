@@ -7,6 +7,14 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .create_type()
+            .create_enum("type", vec!["match_invitation", "match_response", "system"])
+            .await?;
+        manager
+            .create_type()
+            .create_enum("status", vec!["available", "scheduled", "completed"])
+            .await?;
+        manager
             .create_table(
                 Table::create()
                     .table(Messages::Table)
@@ -58,6 +66,20 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_type(
+                sea_orm_migration::prelude::Enum::drop()
+                    .enum_name("type")
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_type(
+                sea_orm_migration::prelude::Enum::drop()
+                    .enum_name("status")
+                    .to_owned(),
+            )
+            .await?;
         manager
             .drop_table(Table::drop().table(Messages::Table).to_owned())
             .await

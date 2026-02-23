@@ -1,4 +1,5 @@
 use sea_orm_migration::{prelude::*, schema::*};
+use crate::extension::postgres::Type;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -6,6 +7,22 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_type(
+                Type::create()
+                    .as_enum(Alias::new("mode"))
+                    .values([Alias::new("std"),Alias::new("taiko"),Alias::new("ctb"),Alias::new("mania")])
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_type(
+                Type::create()
+                    .as_enum(Alias::new("category"))
+                    .values([Alias::new("qua"),Alias::new("ro16"),Alias::new("qf"),Alias::new("sf"),Alias::new("f"),Alias::new("gf")])
+                    .to_owned(),
+            )
+            .await?;
         manager
             .create_table(
                 Table::create()
@@ -42,38 +59,71 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(MapSelections::Cs).decimal().null())
                     .col(ColumnDef::new(MapSelections::Od).decimal().null())
                     .col(ColumnDef::new(MapSelections::Hp).decimal().null())
-                    .col(ColumnDef::new(MapSelections::SelectedMods).json().null())
+                    .col(
+                        ColumnDef::new(MapSelections::Mode)
+                            .custom(Alias::new("mode"))
+                            .not_null()
+                            .default("std"),
+                    )
+                    .col(ColumnDef::new(MapSelections::Mods).json().null())
+                    .col(
+                        ColumnDef::new(MapSelections::SelectedModName)
+                            .string()
+                            .null(),
+                    )
                     .col(
                         ColumnDef::new(MapSelections::SelectedModPosition)
                             .integer()
                             .null(),
                     )
-                    .col(ColumnDef::new(MapSelections::Comment).text().null())
+                    .col(ColumnDef::new(MapSelections::Comment).string().null())
                     .col(ColumnDef::new(MapSelections::SelectedBy).integer().null())
                     .foreign_key(
                         ForeignKey::create()
                             .from(MapSelections::Table, MapSelections::SelectedBy)
-                            .to(Users::Table, Users::Id),
+                            .to(User::Table, User::Id),
                     )
                     .col(
                         ColumnDef::new(MapSelections::SelectedAt)
                             .timestamp()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(MapSelections::Season).string().not_null())
-                    .col(ColumnDef::new(MapSelections::Category).string().not_null())
-                    .col(ColumnDef::new(MapSelections::CoverUrl).text().null())
+                    .col(
+                        ColumnDef::new(MapSelections::Season)
+                            .integer()
+                            .not_null()
+                            .default(1),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::Category)
+                            .custom(Alias::new("category"))
+                            .not_null()
+                            .default("qua"),
+                    )
+                    .col(ColumnDef::new(MapSelections::CoverUrl).string().null())
                     .col(
                         ColumnDef::new(MapSelections::IsApproved)
                             .boolean()
                             .null()
-                            .default(Expr::bool(false)),
+                            .default(false),
                     )
                     .col(
                         ColumnDef::new(MapSelections::IsNeedTest)
                             .boolean()
                             .null()
-                            .default(Expr::bool(false)),
+                            .default(false),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::IsOrigin)
+                            .boolean()
+                            .null()
+                            .default(false),
+                    )
+                    .col(
+                        ColumnDef::new(MapSelections::IsCustome)
+                            .boolean()
+                            .null()
+                            .default(false),
                     )
                     .col(
                         ColumnDef::new(MapSelections::CreatedAt)
@@ -95,6 +145,8 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager.drop_type(Type::drop().name(Alias::new("mode")).to_owned()).await?;
+        manager.drop_type(Type::drop().name(Alias::new("category")).to_owned()).await?;
         manager
             .drop_table(Table::drop().table(MapSelections::Table).to_owned())
             .await
@@ -106,7 +158,7 @@ enum MapSelections {
     Table,
     Id,
     BeatmapId,
-    BeatmapsetId,
+    BeatmapSetId,
     Title,
     TitleUnicode,
     Artist,
@@ -121,17 +173,26 @@ enum MapSelections {
     Cs,
     Od,
     Hp,
-    SelectedMods,
-    ModPosition,
+    Mode,
+    Mods,
+    SelectedModName,
+    SelectedModPosition,
     Comment,
     SelectedBy,
     SelectedAt,
     Season,
     Category,
-    Url,
     CoverUrl,
-    Approved,
-    Padding,
+    IsApproved,
+    IsNeedTest,
+    IsOrigin,
+    IsCustome,
     CreatedAt,
     UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum User {
+    Table,
+    Id,
 }

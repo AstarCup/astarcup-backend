@@ -7,6 +7,14 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .create_type()
+            .create_enum("category", vec!["qua", "ro16", "qf", "sf", "f", "gf"])
+            .await?;
+        manager
+            .create_type()
+            .create_enum("status", vec!["available", "scheduled", "completed"])
+            .await?;
+        manager
             .create_table(
                 Table::create()
                     .table(PlayerMatchups::Table)
@@ -19,22 +27,24 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(PlayerMatchups::Player1OsuId)
+                        ColumnDef::new(PlayerMatchups::Season)
+                            .integer()
+                            .not_null()
+                            .default(1),
+                    )
+                    .col(
+                        ColumnDef::new(PlayerMatchups::Category)
+                            .enumeration("category", vec!["qua", "ro16", "qf", "sf", "f", "gf"])
+                            .not_null()
+                            .default("qua"),
+                    )
+                    .col(
+                        ColumnDef::new(PlayerMatchups::PlayerRedOsuId)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(PlayerMatchups::Player1Username)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(PlayerMatchups::Player2OsuId)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(PlayerMatchups::Player2Username)
+                        ColumnDef::new(PlayerMatchups::PlayerBlueOsuId)
                             .string()
                             .not_null(),
                     )
@@ -42,11 +52,6 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(PlayerMatchups::Status)
                             .enumeration("status", vec!["available", "scheduled", "completed"])
                             .null(),
-                    )
-                    .col(
-                        ColumnDef::new(PlayerMatchups::CreatedBy)
-                            .string()
-                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(PlayerMatchups::CreatedAt)
@@ -69,6 +74,20 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
+            .drop_type(
+                sea_orm_migration::prelude::Enum::drop()
+                    .enum_name("category")
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .drop_type(
+                sea_orm_migration::prelude::Enum::drop()
+                    .enum_name("status")
+                    .to_owned(),
+            )
+            .await?;
+        manager
             .drop_table(Table::drop().table(PlayerMatchups::Table).to_owned())
             .await
     }
@@ -78,12 +97,11 @@ impl MigrationTrait for Migration {
 enum PlayerMatchups {
     Table,
     Id,
-    Player1OsuId,
-    Player1Username,
-    Player2OsuId,
-    Player2Username,
+    Season,
+    Category,
+    PlayerRedOsuId,
+    PlayerBlueOsuId,
     Status,
-    CreatedBy,
     CreatedAt,
     UpdatedAt,
 }

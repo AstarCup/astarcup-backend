@@ -24,7 +24,11 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(MapComments::OsuId).string().not_null())
-                    .col(ColumnDef::new(MapComments::Username).string().not_null())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .from(MapComments::Table, MapComments::OsuId)
+                            .to(User::Table, User::OsuId),
+                    )
                     .col(ColumnDef::new(MapComments::Comment).text().null())
                     .col(
                         ColumnDef::new(MapComments::CreatedAt)
@@ -73,4 +77,9 @@ enum MapComments {
 enum MapSelections {
     Table,
     Id,
+}
+#[derive(DeriveIden)]
+enum User {
+    Table,
+    OsuId,
 }
