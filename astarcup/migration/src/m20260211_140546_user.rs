@@ -9,7 +9,7 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager.create_type(
             Type::create()
-                .as_enum(Alias::new("userState"))
+                .as_enum(Alias::new("user_state"))
                 .values([Alias::new("active"),Alias::new("approved"),Alias::new("banned"),Alias::new("ignored")])
                 .to_owned(),
             )
@@ -17,7 +17,7 @@ impl MigrationTrait for Migration {
         manager
             .create_type(
                 Type::create()
-                    .as_enum(Alias::new("userGroup"))
+                    .as_enum(Alias::new("user_group"))
                     .values([Alias::new("player"),Alias::new("admin"),Alias::new("mapooler"),Alias::new("tester")])
                     .to_owned(),
             )
@@ -25,7 +25,7 @@ impl MigrationTrait for Migration {
         manager
             .create_type(
                 Type::create()
-                    .as_enum(Alias::new("matchStatus"))
+                    .as_enum(Alias::new("match_status"))
                     .values([Alias::new("available"), Alias::new("scheduled"), Alias::new("completed")])
                     .to_owned(),
             )
@@ -78,13 +78,13 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(User::CountryRank).integer().null())
                     .col(
                         ColumnDef::new(User::UserState)
-                            .custom(Alias::new("userState"))
+                            .custom(Alias::new("user_state"))
                             .not_null()
                             .default("active"),
                     )
                     .col(
                         ColumnDef::new(User::UserGroup)
-                            .custom(Alias::new("userGroup"))
+                            .custom(Alias::new("user_group"))
                             .not_null()
                             .default("player"),
                     )
@@ -112,8 +112,8 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager.drop_type(Type::drop().name(Alias::new("userState")).to_owned()).await?;
-        manager.drop_type(Type::drop().name(Alias::new("userGroup")).to_owned()).await?;
+        manager.drop_type(Type::drop().name(Alias::new("user_state")).to_owned()).await?;
+        manager.drop_type(Type::drop().name(Alias::new("user_group")).to_owned()).await?;
         manager
             .drop_table(Table::drop().table(User::Table).to_owned())
             .await
