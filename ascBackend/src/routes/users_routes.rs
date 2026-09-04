@@ -408,6 +408,7 @@ async fn admin_list_users(
                 users::username,
                 users::avatar_url,
                 users::user_group,
+                users::registration_status,
                 users::created_at,
             ))
             .order(users::created_at.desc())
@@ -416,6 +417,7 @@ async fn admin_list_users(
                 String,
                 Option<String>,
                 UserGroup,
+                RegistrationStatus,
                 chrono::NaiveDateTime,
             )>(conn)
             .map_err(AppError::from)
@@ -423,12 +425,13 @@ async fn admin_list_users(
     .await?;
     let users_json: Vec<Value> = list
         .into_iter()
-        .map(|(osu_id, username, avatar, group, created)| {
+        .map(|(osu_id, username, avatar, group, reg, created)| {
             json!({
                 "osuId": osu_id,
                 "username": username,
                 "avatarUrl": avatar,
                 "userGroup": group.as_str(),
+                "registrationStatus": reg.as_str(),
                 "createdAt": created.and_utc().to_rfc3339(),
             })
         })
@@ -457,7 +460,9 @@ async fn admin_approve_user(
 #[derive(serde::Deserialize)]
 struct UpdateUserGroupBody {
     #[serde(rename = "userGroup")]
-    user_group: String,
+    user_group: Option<String>,
+    #[serde(rename = "registrationStatus")]
+    registration_status: Option<String>,
 }
 
 async fn admin_update_user(
@@ -466,19 +471,34 @@ async fn admin_update_user(
     Path(osu_id): Path<String>,
     Json(body): Json<UpdateUserGroupBody>,
 ) -> ApiResult<Json<Value>> {
-    let group = UserGroup::parse(&body.user_group)
-        .ok_or_else(|| AppError::bad_request("userGroup必须是player或admin"))?;
     let n = run_db(&state.pool, move |conn| {
-        diesel::update(users::table.filter(users::osu_id.eq(&osu_id)))
-            .set(users::user_group.eq(group))
-            .execute(conn)
+        if let Some(g) = &body.user_group {
+            let group = UserGroup::parse(g)
+                .ok_or_else(|| AppError::bad_request("userGroup必须是player或admin"))?;
+            diesel::update(users::table.filter(users::osu_id.eq(&osu_id)))
+                .set(users::user_group.eq(group))
+                .execute(conn)
+                .map_err(AppError::from)?;
+        }
+        if let Some(s) = &body.registration_status {
+            let status = RegistrationStatus::parse(s)
+                .ok_or_else(|| AppError::bad_request("无效的报名状态"))?;
+            diesel::update(users::table.filter(users::osu_id.eq(&osu_id)))
+                .set(users::registration_status.eq(status))
+                .execute(conn)
+                .map_err(AppError::from)?;
+        }
+        users::table
+            .filter(users::osu_id.eq(&osu_id))
+            .count()
+            .get_result::<i64>(conn)
             .map_err(AppError::from)
     })
     .await?;
     if n == 0 {
         return Err(AppError::not_found("用户不存在"));
     }
-    Ok(crate::error::ok_msg("用户权限组更新成功", Value::Null))
+    Ok(crate::error::ok_msg("用户更新成功", Value::Null))
 }
 
 async fn admin_delete_user(
