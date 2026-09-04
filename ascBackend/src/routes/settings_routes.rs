@@ -63,14 +63,24 @@ async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     for row in &rows {
         settings.insert(row.setting_key.clone(), parse_value(&row.setting_value));
     }
-    // 附带可选赛季列表（UI 元数据）
-    settings.insert(
-        "availableSeasons".to_string(),
-        json!([
-            { "value": "s1", "label": "Season 1" },
-            { "value": "otc1", "label": "OTC#1" },
-        ]),
-    );
+    // 赛季池：seasons 为 { 赛季id: { name, status } } 字典，
+    // 据此派生旧版兼容的 availableSeasons 列表（value=id, label=name）
+    let available: Vec<Value> = settings
+        .get("seasons")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .map(|(id, v)| {
+                    json!({
+                        "value": id,
+                        "label": v.get("name").and_then(|n| n.as_str()).unwrap_or(id).to_string(),
+                        "status": v.get("status").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    settings.insert("availableSeasons".to_string(), json!(available));
     Ok(ok(Value::Object(settings)))
 }
 
