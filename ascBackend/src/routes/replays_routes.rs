@@ -127,13 +127,14 @@ async fn archive(
 ) -> Result<Response, AppError> {
     let season = q.season.unwrap_or_else(|| "s1".into());
     let category = q.category.unwrap_or_else(|| "qualification".into());
-    let dir_rel = format!("{season}/{category}");
-    let abs_dir = storage_path(&state.config, &dir_rel)?;
 
     // filename 格式: modPosition_bid_userId_username.osr
     let mut files_by_mod: std::collections::BTreeMap<String, Vec<(String, Vec<u8>)>> =
         Default::default();
-    if abs_dir.exists() {
+    for (cat, abs_dir) in replay_dirs(&state, &season, &category).await? {
+        if !abs_dir.exists() {
+            continue;
+        }
         let mut entries = tokio::fs::read_dir(&abs_dir)
             .await
             .map_err(|e| AppError::internal(format!("读取目录失败: {e}")))?;
@@ -157,8 +158,13 @@ async fn archive(
                 .await
                 .map_err(|e| AppError::internal(format!("读取回放失败: {e}")))?;
             let new_name = format!("{mod_position}_{username}_{bid}.osr");
+            let key = if category == "all" {
+                format!("{cat}/{mod_position}")
+            } else {
+                mod_position
+            };
             files_by_mod
-                .entry(mod_position)
+                .entry(key)
                 .or_default()
                 .push((new_name, bytes));
         }
@@ -202,6 +208,39 @@ async fn archive(
 
 // ============ GET /api/replays/uploaded ============
 
+// 需要扫描的 (类别, 绝对目录) 列表；category=="all" 时扫描赛季下所有类别子目录
+async fn replay_dirs(
+    state: &AppState,
+    season: &str,
+    category: &str,
+) -> Result<Vec<(String, std::path::PathBuf)>, AppError> {
+    if category == "all" {
+        let base = storage_path(&state.config, season)?;
+        let mut dirs = Vec::new();
+        if base.exists() {
+            let mut entries = tokio::fs::read_dir(&base)
+                .await
+                .map_err(|e| AppError::internal(format!("读取目录失败: {e}")))?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| AppError::internal(format!("读取目录失败: {e}")))?
+            {
+                if entry.path().is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    dirs.push((name, entry.path()));
+                }
+            }
+        }
+        Ok(dirs)
+    } else {
+        Ok(vec![(
+            category.to_string(),
+            storage_path(&state.config, &format!("{season}/{category}"))?,
+        )])
+    }
+}
+
 async fn uploaded(
     State(state): State<AppState>,
     _admin: crate::auth::AdminUser,
@@ -209,9 +248,11 @@ async fn uploaded(
 ) -> ApiResult<Json<Value>> {
     let season = q.season.unwrap_or_else(|| "s1".into());
     let category = q.category.unwrap_or_else(|| "qualification".into());
-    let abs_dir = storage_path(&state.config, &format!("{season}/{category}"))?;
     let mut uploaded_users: serde_json::Map<String, Value> = serde_json::Map::new();
-    if abs_dir.exists() {
+    for (cat, abs_dir) in replay_dirs(&state, &season, &category).await? {
+        if !abs_dir.exists() {
+            continue;
+        }
         let mut entries = tokio::fs::read_dir(&abs_dir)
             .await
             .map_err(|e| AppError::internal(format!("读取目录失败: {e}")))?;
@@ -227,7 +268,7 @@ async fn uploaded(
             }
             let bid = parts[1];
             let username = parts[3].trim_end_matches(".osr");
-            let key = format!("{season}/{category}/{bid}");
+            let key = format!("{season}/{cat}/{bid}");
             let list = uploaded_users.entry(key).or_insert_with(|| json!([]));
             if let Some(arr) = list.as_array_mut() {
                 if !arr.iter().any(|v| v.as_str() == Some(username)) {

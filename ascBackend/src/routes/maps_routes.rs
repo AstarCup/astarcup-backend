@@ -160,6 +160,10 @@ struct AddSelectionBody {
     season: Option<String>,
     #[serde(rename = "category", default)]
     category: Option<String>,
+    #[serde(rename = "isCustome", default)]
+    is_custome: Option<bool>,
+    #[serde(rename = "isOrigin", default)]
+    is_origin: Option<bool>,
     #[serde(rename = "moddedStats", default)]
     modded_stats: Option<Value>,
     // 自定图池
@@ -266,6 +270,8 @@ async fn add_selection(
             "coverUrl": body.cover_url.clone().unwrap_or_default(),
             "approved": body.approved.unwrap_or(false),
             "padding": false,
+            "isCustome": body.is_custome.unwrap_or(false),
+            "isOrigin": body.is_origin.unwrap_or(false),
         });
     } else {
         // 普通 URL 选图
@@ -289,7 +295,7 @@ async fn add_selection(
         };
 
         // 使用 mod 计算后的参数（如提供）或原参数
-        let (ar, cs, od, hp, sr, bpm, max_combo) = if let Some(m) = &body.modded_stats {
+        let (ar, cs, od, hp, sr, bpm, max_combo, total_length) = if let Some(m) = &body.modded_stats {
             (
                 m.get("ar")
                     .and_then(|v| v.as_f64())
@@ -313,7 +319,11 @@ async fn add_selection(
                 m.get("max_combo")
                     .or_else(|| m.get("maxCombo"))
                     .and_then(|v| v.as_i64())
-                    .unwrap_or(0),
+                    .unwrap_or(beatmap["max_combo"].as_i64().unwrap_or(0)),
+                m.get("totalLength")
+                    .or_else(|| m.get("total_length"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(beatmap["total_length"].as_i64().unwrap_or(0)),
             )
         } else {
             (
@@ -324,12 +334,13 @@ async fn add_selection(
                 beatmap["star_rating"].as_f64().unwrap_or(0.0),
                 beatmap["bpm"].as_f64().unwrap_or(0.0),
                 beatmap["max_combo"].as_i64().unwrap_or(0),
+                beatmap["total_length"].as_i64().unwrap_or(0),
             )
         };
 
         data = json!({
             "beatmapId": beatmap["id"],
-            "beatmapsetId": beatmap["beatmapset_id"],
+            "beatmapsetId": beatmap["beatmapsetId"],
             "title": beatmap["title"],
             "title_unicode": beatmap["title_unicode"],
             "artist": beatmap["artist"],
@@ -338,7 +349,7 @@ async fn add_selection(
             "creator": beatmap["creator"],
             "starRating": sr,
             "bpm": bpm,
-            "totalLength": beatmap["total_length"],
+            "totalLength": total_length,
             "maxCombo": max_combo,
             "ar": ar,
             "cs": cs,
@@ -354,6 +365,8 @@ async fn add_selection(
             "coverUrl": beatmap["cover_url"].as_str().unwrap_or(""),
             "approved": body.approved.unwrap_or(false),
             "padding": false,
+            "isCustome": body.is_custome.unwrap_or(false),
+            "isOrigin": body.is_origin.unwrap_or(false),
         });
     }
 
@@ -413,8 +426,8 @@ async fn add_selection(
                     .eq(insert_data["coverUrl"].as_str().map(|s| s.to_string())),
                 map_selections::approved.eq(insert_data["approved"].as_bool().unwrap_or(false)),
                 map_selections::padding.eq(insert_data["padding"].as_bool().unwrap_or(false)),
-                map_selections::is_custome.eq(false),
-                map_selections::is_origin.eq(false),
+                map_selections::is_custome.eq(insert_data["isCustome"].as_bool().unwrap_or(false)),
+                map_selections::is_origin.eq(insert_data["isOrigin"].as_bool().unwrap_or(false)),
                 map_selections::created_at.eq(now),
                 map_selections::updated_at.eq(now),
             ))
@@ -458,6 +471,14 @@ struct UpdateSelectionBody {
     version: Option<String>,
     #[serde(default)]
     category: Option<String>,
+    #[serde(default)]
+    season: Option<String>,
+    #[serde(rename = "modPosition", default)]
+    mod_position: Option<i64>,
+    #[serde(rename = "isCustome", default)]
+    is_custome: Option<bool>,
+    #[serde(rename = "isOrigin", default)]
+    is_origin: Option<bool>,
     #[serde(rename = "totalLength", default)]
     total_length: Option<i64>,
     #[serde(rename = "maxCombo", default)]
@@ -498,6 +519,10 @@ async fn update_selection(
         || body.artist_unicode.is_some()
         || body.version.is_some()
         || body.category.is_some()
+        || body.season.is_some()
+        || body.mod_position.is_some()
+        || body.is_custome.is_some()
+        || body.is_origin.is_some()
         || body.total_length.is_some()
         || body.max_combo.is_some()
         || body.custom_mod_name.is_some()
@@ -594,6 +619,13 @@ async fn update_selection(
                 body.category
                     .clone()
                     .map(|v| map_selections::category.eq(Some(v))),
+                body.season
+                    .clone()
+                    .map(|v| map_selections::season.eq(Some(v))),
+                body.mod_position
+                    .map(|v| map_selections::mod_position.eq(Some(v as i32))),
+                body.is_custome.map(|v| map_selections::is_custome.eq(v)),
+                body.is_origin.map(|v| map_selections::is_origin.eq(v)),
                 body.total_length
                     .map(|v| map_selections::total_length.eq(v as i32)),
                 max_combo.map(|v| map_selections::max_combo.eq(v as i32)),

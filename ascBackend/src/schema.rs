@@ -21,7 +21,7 @@ table! {
         user_group -> crate::enums::UserGroupType,
         #[sql_name = "registrationStatus"]
         registration_status -> crate::enums::RegistrationStatusType,
-        season -> Nullable<Varchar>,
+        season -> Nullable<diesel::sql_types::Array<diesel::sql_types::Text>>,
         accuracy -> Nullable<Float8>,
         stamina -> Nullable<Float8>,
         #[sql_name = "firstSight"]
