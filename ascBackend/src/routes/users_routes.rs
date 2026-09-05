@@ -124,20 +124,13 @@ async fn register(
             .optional()
             .map_err(AppError::from)?;
         if let Some(u) = existing {
-            let mut seasons: Vec<String> = u
-                .season
-                .as_deref()
-                .unwrap_or("")
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect();
+            let mut seasons: Vec<String> = u.season.clone().unwrap_or_default();
             if !seasons.contains(&season_c) {
                 seasons.push(season_c.clone());
             }
             diesel::update(users::table.find(u.id))
                 .set((
-                    users::season.eq(seasons.join(",")),
+                    users::season.eq(Some(seasons)),
                     users::registration_status.eq(RegistrationStatus::Registered),
                     users::accuracy.eq(body.accuracy),
                     users::stamina.eq(body.stamina),
@@ -166,7 +159,7 @@ async fn register(
                     users::country_rank.eq(body.country_rank),
                     users::user_group.eq(UserGroup::Player),
                     users::registration_status.eq(RegistrationStatus::Registered),
-                    users::season.eq(&season_c),
+                    users::season.eq(Some(vec![season_c.clone()])),
                     users::accuracy.eq(body.accuracy),
                     users::stamina.eq(body.stamina),
                     users::first_sight.eq(body.first_sight),

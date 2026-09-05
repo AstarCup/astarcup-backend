@@ -24,7 +24,7 @@ CREATE TABLE "User" (
     "country" TEXT NOT NULL,
     "userGroup" "UserGroup" NOT NULL DEFAULT 'player',
     "registrationStatus" "RegistrationStatus" NOT NULL DEFAULT 'not_registered',
-    "season" TEXT,
+    "season" TEXT[],
     "accuracy" DOUBLE PRECISION,
     "stamina" DOUBLE PRECISION,
     "firstSight" DOUBLE PRECISION,

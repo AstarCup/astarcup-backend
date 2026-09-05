@@ -24,7 +24,7 @@ pub struct User {
     pub country: String,
     pub user_group: UserGroup,
     pub registration_status: RegistrationStatus,
-    pub season: Option<String>,
+    pub season: Option<Vec<String>>,
     pub accuracy: Option<f64>,
     pub stamina: Option<f64>,
     pub first_sight: Option<f64>,
