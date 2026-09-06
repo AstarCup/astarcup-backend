@@ -1,0 +1,7 @@
+2026-09-06T00:11:26.773520Z  INFO ascBackend: Astra Cup 后端已启动: http://0.0.0.0:4000
+2026-09-06T00:13:27.339554Z  INFO ascBackend: [req] 127.0.0.1 AeCw GET /api/settings -> 200 OK (109ms)
+2026-09-06T00:13:27.366967Z  INFO ascBackend: [req] 127.0.0.1 AeCw GET /api/auth/me -> 200 OK (136ms)
+2026-09-06T00:13:27.395234Z  INFO ascBackend: [req] 127.0.0.1 AeCw GET /api/settings -> 200 OK (52ms)
+2026-09-06T00:13:27.439626Z  INFO ascBackend: [req] 127.0.0.1 AeCw GET /api/auth/me -> 200 OK (70ms)
+2026-09-06T00:13:27.485223Z  INFO ascBackend: [req] 127.0.0.1 AeCw GET /api/messages -> 200 OK (95ms)
+2026-09-06T00:13:27.533240Z  INFO ascBackend: [req] 127.0.0.1 AeCw GET /api/messages -> 200 OK (45ms)

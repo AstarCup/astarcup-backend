@@ -1,9 +1,15 @@
 // Astra Cup 后端（Rust / axum 重写版）
 // 统一 JWT 认证 + 整合优化后的 API（见各 routes 模块顶部注释）
 use std::sync::Arc;
+use std::time::Instant;
 
+use axum::extract::{Request, State};
+use axum::middleware::Next;
+use axum::response::Response;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 mod auth;
 mod config;
@@ -20,13 +26,61 @@ mod util;
 use config::Config;
 use state::AppState;
 
+// 全局请求日志：记录 IP、方法、路径、状态码、耗时与登录用户名
+async fn log_request(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let start = Instant::now();
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let ip = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0.ip().to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let username = req
+        .headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|raw| {
+            raw.split(';')
+                .map(|p| p.trim())
+                .find_map(|p| p.strip_prefix(&format!("{}=", auth::SESSION_COOKIE)))
+        })
+        .and_then(|token| auth::verify_token(&state.config, token).ok())
+        .map(|claims| claims.username)
+        .unwrap_or_else(|| "-".to_string());
+    let response = next.run(req).await;
+    tracing::info!(
+        "[req] {} {} {} {} -> {} ({}ms)",
+        ip,
+        username,
+        method,
+        uri,
+        response.status(),
+        start.elapsed().as_millis()
+    );
+    response
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "asc_backend=info,tower_http=info".into()),
+
+    // 日志：stdout 彩色输出 + 落盘（按天滚动，控制单文件体积）
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "ascBackend=info,tower_http=info".into());
+    let file_appender = tracing_appender::rolling::daily("logs", "ascBackend.log");
+    let (file_writer, _file_guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stdout)
+                .with_ansi(true),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(file_writer)
+                .with_ansi(false),
         )
         .init();
 
@@ -70,6 +124,7 @@ async fn main() {
     };
     let app = routes::build_router()
         .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(state.clone(), log_request))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -78,5 +133,10 @@ async fn main() {
         .await
         .expect("端口绑定失败");
     tracing::info!("Astra Cup 后端已启动: http://{addr}");
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
