@@ -110,6 +110,16 @@ async fn create_schedule(
             .player2_username
             .ok_or_else(|| AppError::bad_request("缺少选手2信息"))?;
         let room_id = i32::try_from(room_id).map_err(|_| AppError::bad_request("无效的房间ID"))?;
+        let room = run_db(&state.pool, move |conn| {
+            match_rooms::table
+                .find(room_id)
+                .first::<MatchRoom>(conn)
+                .optional()
+                .map_err(AppError::from)
+        })
+        .await?
+        .ok_or_else(|| AppError::not_found("房间不存在"))?;
+        ensure_not_within_2h(&room)?;
         let schedule =
             insert_schedule(&state, room_id, p1, p1u, p2, p2u, user.osu_id.clone()).await?;
         return Ok(ok_msg(
@@ -160,18 +170,38 @@ async fn create_schedule(
         return Err(AppError::bad_request("房间不可用"));
     }
 
-    let schedule = insert_schedule(
-        &state,
-        room_id,
-        matchup.player1_osu_id.clone(),
-        matchup.player1_username.clone(),
-        matchup.player2_osu_id.clone(),
-        matchup.player2_username.clone(),
-        user.osu_id.clone(),
-    )
+    // 玩家预约前校验：房间已被安排（有赛程或被 pending/scheduled 对战占用）则拒绝
+    let room_claimed = run_db(&state.pool, move |conn| {
+        let has_schedule = match_schedules::table
+            .filter(match_schedules::room_id.eq(room_id))
+            .select(match_schedules::id)
+            .first::<i32>(conn)
+            .optional()
+            .map_err(AppError::from)?;
+        if has_schedule.is_some() {
+            return Ok(true);
+        }
+        let mu = player_matchups::table
+            .filter(player_matchups::room_id.eq(room_id))
+            .filter(
+                player_matchups::status
+                    .eq_any(vec![MatchupStatus::Pending, MatchupStatus::Scheduled]),
+            )
+            .select(player_matchups::id)
+            .first::<i32>(conn)
+            .optional()
+            .map_err(AppError::from)?;
+        Ok(mu.is_some())
+    })
     .await?;
+    if room_claimed {
+        return Err(AppError::bad_request("该房间已被安排，请选择其他房间"));
+    }
 
-    // 模式 3：发送邀请消息给对手并置 scheduled
+    // 比赛时间前 2 小时内禁止预约安排
+    ensure_not_within_2h(&room)?;
+
+    // 模式 3（send_notification）：只发送邀请并置 pending，待对手确认后再创建赛程
     if body.send_notification {
         let (opp_id, opp_name) = if matchup.player1_osu_id == user.osu_id {
             (
@@ -184,10 +214,26 @@ async fn create_schedule(
                 matchup.player1_username.clone(),
             )
         };
+        // 对战绑定预约房间并进入待确认状态
+        let matchup_id = matchup.id;
+        run_db(&state.pool, move |conn| {
+            diesel::update(player_matchups::table.find(matchup_id))
+                .set((
+                    player_matchups::status.eq(MatchupStatus::Pending),
+                    player_matchups::room_id.eq(Some(room_id)),
+                    player_matchups::updated_at.eq(Utc::now().naive_utc()),
+                ))
+                .execute(conn)
+                .map_err(AppError::from)
+        })
+        .await?;
+
         let now = Utc::now().naive_utc();
+        let room_name = room.room_name.clone();
+        let room_time = room.match_time.to_string();
         let content = format!(
-            "{} 已预约与你在 {} 的对战。请确认是否接受。",
-            user.username, room.room_name
+            "{} 预约了与你的对战。房间：{}（{}）。请确认是否接受。",
+            user.username, room_name, room_time
         );
         let message_id = run_db(&state.pool, move |conn| {
             diesel::insert_into(messages::table)
@@ -209,16 +255,36 @@ async fn create_schedule(
                 .map_err(AppError::from)
         })
         .await?;
-        set_matchup_status(&state, matchup.id, MatchupStatus::Scheduled).await?;
         return Ok(ok_msg(
             "预约成功，已发送确认请求给对手",
-            json!({ "schedule": schedule.to_json(None), "messageId": message_id }),
+            json!({ "matchupId": matchup.id, "messageId": message_id, "room": room.to_json() }),
         ));
     }
 
-    // 模式 2：普通创建
+    // 模式 2：直接创建赛程（不发送通知）
+    let schedule = insert_schedule(
+        &state,
+        room_id,
+        matchup.player1_osu_id.clone(),
+        matchup.player1_username.clone(),
+        matchup.player2_osu_id.clone(),
+        matchup.player2_username.clone(),
+        user.osu_id.clone(),
+    )
+    .await?;
     set_matchup_status(&state, matchup.id, MatchupStatus::Scheduled).await?;
     Ok(ok_msg("比赛预约创建成功", schedule.to_json(None)))
+}
+
+/// 比赛时间前 2 小时内禁止预约/安排
+fn ensure_not_within_2h(room: &MatchRoom) -> Result<(), AppError> {
+    let now = Utc::now().naive_utc();
+    if room.match_time <= now + chrono::Duration::hours(2) {
+        return Err(AppError::bad_request(
+            "距比赛开始不足 2 小时，暂不可预约/安排该房间",
+        ));
+    }
+    Ok(())
 }
 
 async fn insert_schedule(

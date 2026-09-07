@@ -65,7 +65,7 @@ pg_enum!(ScheduleStatus, ScheduleStatusType, "ScheduleStatus", {
 });
 
 pg_enum!(MatchupStatus, MatchupStatusType, "MatchupStatus", {
-    Available => "available", Scheduled => "scheduled", Completed => "completed",
+    Available => "available", Pending => "pending", Scheduled => "scheduled", Completed => "completed",
 });
 
 pg_enum!(MessageType, MessageTypeType, "MessageType", {

@@ -11,10 +11,10 @@ use diesel::prelude::*;
 use serde_json::{Value, json};
 
 use crate::db::run_db;
-use crate::enums::{MatchupStatus, MessageStatus};
+use crate::enums::{MatchupStatus, MessageStatus, ScheduleStatus};
 use crate::error::{ApiResult, AppError, ok, ok_msg};
-use crate::models::Message;
-use crate::schema::{messages, player_matchups};
+use crate::models::{Message, PlayerMatchup};
+use crate::schema::{match_schedules, messages, player_matchups};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -54,7 +54,7 @@ struct MessageActionBody {
 
 async fn handle_message_action(
     State(state): State<AppState>,
-    _user: crate::auth::SessionUser,
+    user: crate::auth::SessionUser,
     Json(body): Json<MessageActionBody>,
 ) -> ApiResult<Json<Value>> {
     if !matches!(body.action.as_str(), "read" | "accept" | "decline") {
@@ -78,7 +78,7 @@ async fn handle_message_action(
         return Err(AppError::not_found("消息不存在或更新失败"));
     }
 
-    // accept/decline 时联动对战状态
+    // accept：创建赛程并对战置 scheduled；decline：对战回到 available
     if matches!(body.action.as_str(), "accept" | "decline") {
         let msg = run_db(&state.pool, move |conn| {
             messages::table
@@ -90,23 +90,86 @@ async fn handle_message_action(
         .await?;
         if let Some(m) = msg {
             if let Some(matchup_id) = m.related_matchup_id {
-                let new_status = if body.action == "accept" {
-                    MatchupStatus::Scheduled
-                } else {
-                    MatchupStatus::Available
-                };
-                run_db(&state.pool, move |conn| {
-                    diesel::update(player_matchups::table.find(matchup_id))
-                        .set((
-                            player_matchups::status.eq(new_status),
-                            player_matchups::updated_at.eq(Utc::now().naive_utc()),
-                        ))
-                        .execute(conn)
+                let matchup = run_db(&state.pool, move |conn| {
+                    player_matchups::table
+                        .find(matchup_id)
+                        .first::<PlayerMatchup>(conn)
+                        .optional()
                         .map_err(AppError::from)
                 })
                 .await?;
+                if let Some(mu) = matchup {
+                    let is_pending = mu.status == MatchupStatus::Pending;
+                    if body.action == "accept" {
+                        if is_pending {
+                            let room_id = mu.room_id.ok_or_else(|| {
+                                AppError::bad_request("缺少预约房间，无法创建赛程")
+                            })?;
+                            insert_schedule_from_matchup(&state, &mu, room_id, user.osu_id.clone())
+                                .await?;
+                        }
+                        // 置 scheduled（历史邀请已是 scheduled 则幂等跳过创建）
+                        run_db(&state.pool, move |conn| {
+                            diesel::update(player_matchups::table.find(matchup_id))
+                                .set((
+                                    player_matchups::status.eq(MatchupStatus::Scheduled),
+                                    player_matchups::updated_at.eq(Utc::now().naive_utc()),
+                                ))
+                                .execute(conn)
+                                .map_err(AppError::from)
+                        })
+                        .await?;
+                    } else if is_pending {
+                        // decline：回到可预约，并清除绑定的房间
+                        run_db(&state.pool, move |conn| {
+                            diesel::update(player_matchups::table.find(matchup_id))
+                                .set((
+                                    player_matchups::status.eq(MatchupStatus::Available),
+                                    player_matchups::room_id.eq(None::<i32>),
+                                    player_matchups::updated_at.eq(Utc::now().naive_utc()),
+                                ))
+                                .execute(conn)
+                                .map_err(AppError::from)
+                        })
+                        .await?;
+                    }
+                }
             }
         }
     }
     Ok(ok_msg("消息状态更新成功", Value::Null))
+}
+
+/// 接受邀请后按对战绑定的房间创建赛程（pending，等待 staff 最终确认）
+async fn insert_schedule_from_matchup(
+    state: &AppState,
+    mu: &PlayerMatchup,
+    room_id: i32,
+    created_by: String,
+) -> Result<(), AppError> {
+    let p1 = mu.player1_osu_id.clone();
+    let p1u = mu.player1_username.clone();
+    let p2 = mu.player2_osu_id.clone();
+    let p2u = mu.player2_username.clone();
+    run_db(&state.pool, move |conn| {
+        let now = Utc::now().naive_utc();
+        diesel::insert_into(match_schedules::table)
+            .values((
+                match_schedules::room_id.eq(room_id),
+                match_schedules::player1_osu_id.eq(&p1),
+                match_schedules::player1_username.eq(&p1u),
+                match_schedules::player2_osu_id.eq(&p2),
+                match_schedules::player2_username.eq(&p2u),
+                match_schedules::red_score.eq(0),
+                match_schedules::blue_score.eq(0),
+                match_schedules::status.eq(ScheduleStatus::Pending),
+                match_schedules::created_by.eq(&created_by),
+                match_schedules::created_at.eq(now),
+                match_schedules::updated_at.eq(now),
+            ))
+            .execute(conn)
+            .map_err(AppError::from)?;
+        Ok(())
+    })
+    .await
 }
