@@ -311,7 +311,7 @@ async fn me_next_match(
     State(state): State<AppState>,
     user: crate::auth::SessionUser,
 ) -> ApiResult<Json<Value>> {
-    use crate::schema::player_matchups;
+    use crate::schema::{match_rooms, player_matchups};
     let osu_id = user.osu_id.clone();
     let matchup = run_db(&state.pool, move |conn| {
         player_matchups::table
@@ -320,7 +320,9 @@ async fn me_next_match(
                     .eq(&osu_id)
                     .or(player_matchups::player2_osu_id.eq(&osu_id)),
             )
-            .filter(player_matchups::status.eq(crate::enums::MatchupStatus::Available))
+            .filter(
+                player_matchups::status.ne(crate::enums::MatchupStatus::Completed),
+            )
             .order(player_matchups::created_at.asc())
             .first::<crate::models::PlayerMatchup>(conn)
             .optional()
@@ -355,10 +357,28 @@ async fn me_next_match(
         Some((name, avatar)) => (name, avatar),
         None => (fallback_username, None),
     };
+
+    // 附带预约/已安排的房间信息（含比赛时间），供玩家查看
+    let mut room_json = Value::Null;
+    if let Some(room_id) = m.room_id {
+        let room = run_db(&state.pool, move |conn| {
+            match_rooms::table
+                .find(room_id)
+                .first::<crate::models::MatchRoom>(conn)
+                .optional()
+                .map_err(AppError::from)
+        })
+        .await?;
+        if let Some(r) = room {
+            room_json = r.to_json();
+        }
+    }
+
     Ok(ok(json!({
         "id": m.id,
         "opponent": { "osuId": opponent_osu_id, "username": username, "avatarUrl": avatar },
         "status": m.status.as_str(),
+        "room": room_json,
     })))
 }
 

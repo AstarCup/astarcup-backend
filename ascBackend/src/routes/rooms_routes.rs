@@ -86,7 +86,7 @@ async fn list_rooms(
         Default::default()
     };
 
-    let rooms_json: Vec<Value> = rooms
+    let mut rooms_json: Vec<Value> = rooms
         .iter()
         .map(|r| {
             let mut v = r.to_json();
@@ -96,6 +96,38 @@ async fn list_rooms(
             v
         })
         .collect();
+
+    // 已被安排的房间：有赛程，或被 pending/scheduled 对战占用 —— 不可再被预约
+    let claimed_ids: std::collections::HashSet<i32> = {
+        let (sched_rooms, mu_rooms) = run_db(&state.pool, |conn| {
+            let sched: Vec<i32> = match_schedules::table
+                .select(match_schedules::room_id)
+                .load(conn)
+                .map_err(AppError::from)?;
+            let mu: Vec<i32> = crate::schema::player_matchups::table
+                .filter(
+                    crate::schema::player_matchups::status.eq_any(vec![
+                        crate::enums::MatchupStatus::Pending,
+                        crate::enums::MatchupStatus::Scheduled,
+                    ]),
+                )
+                .select(crate::schema::player_matchups::room_id)
+                .load::<Option<i32>>(conn)
+                .map_err(AppError::from)?
+                .into_iter()
+                .flatten()
+                .collect();
+            Ok::<_, AppError>((sched, mu))
+        })
+        .await?;
+        sched_rooms.into_iter().chain(mu_rooms).collect()
+    };
+    for v in &mut rooms_json {
+        if let Some(id) = v.get("id").and_then(|x| x.as_i64()) {
+            v["claimed"] = json!(claimed_ids.contains(&(id as i32)));
+        }
+    }
+
     Ok(ok(json!(rooms_json)))
 }
 
