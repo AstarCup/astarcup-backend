@@ -1,0 +1,44 @@
+name: Backend Build (Linux x86_64)
+
+# 仅针对 Linux x86_64 构建后端（ubuntu-latest = x86_64 Linux）
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ascBackend (linux x86_64)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ascBackend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # diesel(postgres) 需要 libpq，reqwest(native-tls) 需要 openssl
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev libssl-dev pkg-config
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ascBackend
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ascBackend-linux-x86_64
+          path: ascBackend/target/release/ascBackend
+          if-no-files-found: error
