@@ -16,6 +16,12 @@ pub struct Config {
     pub osu_redirect_uri: String,
     pub storage_dir: String,
     pub vocab_dir: String,
+    // g0v0 私服 OAuth 绑定（API 与 osu! v2 一致）
+    pub g0v0_enabled: bool,
+    pub g0v0_client_id: String,
+    pub g0v0_client_secret: String,
+    pub g0v0_redirect_uri: String,
+    pub g0v0_oauth_base: String,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -51,6 +57,14 @@ impl Config {
                 "VOCAB_DIR",
                 "/home/aecw/astarcup/astracup-web/src/app/api/content-detect/Vocabulary",
             ),
+            g0v0_enabled: env_or("G0V0_ENABLED", "false") == "true",
+            g0v0_client_id: env_or("G0V0_CLIENT_ID", ""),
+            g0v0_client_secret: env_or("G0V0_CLIENT_SECRET", ""),
+            g0v0_redirect_uri: env_or(
+                "G0V0_REDIRECT_URI",
+                "http://localhost:4000/api/bind/callback",
+            ),
+            g0v0_oauth_base: env_or("G0V0_OAUTH_BASE", "https://lazer-api.g0v0.top"),
         }
     }
 }

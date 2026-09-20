@@ -37,6 +37,11 @@ pub struct User {
     pub cover_id: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    // g0v0 私服绑定
+    pub gu_server_user_id: Option<String>,
+    pub gu_server_username: Option<String>,
+    pub gu_server_bind_at: Option<NaiveDateTime>,
+    pub gu_refresh_token: Option<String>,
 }
 
 impl User {
@@ -66,6 +71,10 @@ impl User {
                 "url": url,
                 "id": self.cover_id,
             })),
+            "guServerUserId": self.gu_server_user_id,
+            "guServerUsername": self.gu_server_username,
+            "guServerBindAt": self.gu_server_bind_at.map(|t| t.and_utc().to_rfc3339()),
+            "g0v0Bound": self.gu_server_user_id.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
             "createdAt": self.created_at.and_utc().to_rfc3339(),
             "updatedAt": self.updated_at.and_utc().to_rfc3339(),
         })

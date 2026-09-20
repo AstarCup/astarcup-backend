@@ -39,6 +39,15 @@ table! {
         created_at -> Timestamp,
         #[sql_name = "updatedAt"]
         updated_at -> Timestamp,
+        // g0v0 私服绑定
+        #[sql_name = "guServerUserId"]
+        gu_server_user_id -> Nullable<Varchar>,
+        #[sql_name = "guServerUsername"]
+        gu_server_username -> Nullable<Varchar>,
+        #[sql_name = "guServerBindAt"]
+        gu_server_bind_at -> Nullable<Timestamp>,
+        #[sql_name = "guRefreshToken"]
+        gu_refresh_token -> Nullable<Varchar>,
     }
 }
 
