@@ -111,6 +111,23 @@ async fn register(
             "缺少必要字段 (osuId, username, country)",
         ));
     }
+
+    // 报名门槛：必须先绑定 g0v0 服务器账号
+    let osu_id_check = body.osu_id.clone();
+    let bound: Option<String> = run_db(&state.pool, move |conn| {
+        users::table
+            .filter(users::osu_id.eq(&osu_id_check))
+            .select(users::gu_server_user_id)
+            .first::<Option<String>>(conn)
+            .optional()
+            .map_err(AppError::from)
+    })
+    .await?
+    .flatten();
+    if bound.as_deref().map(|s| s.is_empty()).unwrap_or(true) {
+        return Err(AppError::forbidden("请先绑定 g0v0 服务器账号后再报名"));
+    }
+
     let season = current_season(&state).await?;
 
     // 赛季逗号追加去重 + 报名

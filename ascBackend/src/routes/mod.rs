@@ -1,4 +1,5 @@
 pub mod auth_routes;
+pub mod bind_routes;
 pub mod users_routes;
 pub mod rooms_routes;
 pub mod schedules_routes;
@@ -20,6 +21,7 @@ use crate::state::AppState;
 pub fn build_router() -> Router<AppState> {
     Router::new()
         .merge(auth_routes::router())
+        .merge(bind_routes::router())
         .merge(users_routes::router())
         .merge(rooms_routes::router())
         .merge(schedules_routes::router())
