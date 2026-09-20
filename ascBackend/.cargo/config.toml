@@ -1,0 +1,4 @@
+# 链接 PostgreSQL 客户端库 libpq.lib（libpq-sys/diesel 需要）
+# 对应文件位于 ascBackend/.pgsql/lib/libpq.lib
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-L", "native=./.pgsql/lib"]
