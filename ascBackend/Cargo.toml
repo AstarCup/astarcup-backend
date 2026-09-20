@@ -27,4 +27,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 anyhow = "1"
-rosu-pp = "4.0.1"
+rosu-pp = { git = "https://github.com/Apeuriox/rosu-pp", branch = "pp-rework-202607" }
