@@ -211,10 +211,8 @@ async fn stats(
         let pending_maps: Vec<&MapSelection> =
             maps.iter().filter(|m| !m.approved && !m.padding).collect();
 
-        let mut seasons: Vec<String> = approved_maps
-            .iter()
-            .filter_map(|m| m.season.clone())
-            .collect();
+        // 赛季列表取自全部选图（含待审/测图），避免某赛季暂无已审核图时整季统计缺失
+        let mut seasons: Vec<String> = maps.iter().filter_map(|m| m.season.clone()).collect();
         seasons.sort();
         seasons.dedup();
 
@@ -259,6 +257,7 @@ async fn stats(
                     }
                 };
                 let sr2 = |v: f64| -> f64 { (v * 100.0).round() / 100.0 };
+                let round_i64 = |v: f64| -> i64 { v.round() as i64 };
                 stats_arr.push(json!({
                     "category": cat,
                     "label": label,
@@ -268,6 +267,24 @@ async fn stats(
                     "avgLength": avg_len(&a),
                     "avgLengthTesting": avg_len(&t),
                     "avgLengthPending": avg_len(&p),
+                    "avgAr": sr2(avg(&a, |m| m.ar)),
+                    "avgArTesting": sr2(avg(&t, |m| m.ar)),
+                    "avgArPending": sr2(avg(&p, |m| m.ar)),
+                    "avgCs": sr2(avg(&a, |m| m.cs)),
+                    "avgCsTesting": sr2(avg(&t, |m| m.cs)),
+                    "avgCsPending": sr2(avg(&p, |m| m.cs)),
+                    "avgOd": sr2(avg(&a, |m| m.od)),
+                    "avgOdTesting": sr2(avg(&t, |m| m.od)),
+                    "avgOdPending": sr2(avg(&p, |m| m.od)),
+                    "avgHp": sr2(avg(&a, |m| m.hp)),
+                    "avgHpTesting": sr2(avg(&t, |m| m.hp)),
+                    "avgHpPending": sr2(avg(&p, |m| m.hp)),
+                    "avgBpm": sr2(avg(&a, |m| m.bpm)),
+                    "avgBpmTesting": sr2(avg(&t, |m| m.bpm)),
+                    "avgBpmPending": sr2(avg(&p, |m| m.bpm)),
+                    "avgMaxCombo": round_i64(avg(&a, |m| m.max_combo as f64)),
+                    "avgMaxComboTesting": round_i64(avg(&t, |m| m.max_combo as f64)),
+                    "avgMaxComboPending": round_i64(avg(&p, |m| m.max_combo as f64)),
                     "count": a.len(),
                     "testingCount": t.len(),
                     "pendingCount": p.len(),
