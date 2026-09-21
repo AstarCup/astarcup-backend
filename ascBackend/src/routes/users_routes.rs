@@ -47,13 +47,25 @@ pub fn router() -> Router<AppState> {
 
 // ============ GET /api/users ============
 
-async fn list_registrations(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+#[derive(serde::Deserialize)]
+struct UsersQuery {
+    status: Option<String>,
+}
+
+async fn list_registrations(
+    State(state): State<AppState>,
+    Query(q): Query<UsersQuery>,
+) -> ApiResult<Json<Value>> {
+    let want_all = q.status.as_deref() == Some("all");
     let list = run_db(&state.pool, move |conn| {
-        users::table
-            .filter(
+        let mut query = users::table.into_boxed();
+        if !want_all {
+            query = query.filter(
                 users::registration_status
                     .eq_any([RegistrationStatus::Registered, RegistrationStatus::Approved]),
-            )
+            );
+        }
+        query
             .order(users::registered_at.desc())
             .load::<User>(conn)
             .map_err(AppError::from)
@@ -440,6 +452,7 @@ async fn admin_list_users(
                 users::user_group,
                 users::registration_status,
                 users::created_at,
+                users::season,
             ))
             .order(users::created_at.desc())
             .load::<(
@@ -449,13 +462,14 @@ async fn admin_list_users(
                 UserGroup,
                 RegistrationStatus,
                 chrono::NaiveDateTime,
+                Option<Vec<String>>,
             )>(conn)
             .map_err(AppError::from)
     })
     .await?;
     let users_json: Vec<Value> = list
         .into_iter()
-        .map(|(osu_id, username, avatar, group, reg, created)| {
+        .map(|(osu_id, username, avatar, group, reg, created, season)| {
             json!({
                 "osuId": osu_id,
                 "username": username,
@@ -463,6 +477,7 @@ async fn admin_list_users(
                 "userGroup": group.as_str(),
                 "registrationStatus": reg.as_str(),
                 "createdAt": created.and_utc().to_rfc3339(),
+                "season": season,
             })
         })
         .collect();
