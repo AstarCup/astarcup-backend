@@ -73,13 +73,14 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/deploy_key -p $SSH_PORT"
+          # 公共连接参数；注意 scp 端口是 -P（大写），ssh 端口是 -p（小写）
+          SSH_COMMON="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/deploy_key"
 
           # 1) 上传新二进制（临时文件名 .new，避免覆盖运行中的文件）
-          scp $SSH_OPTS ./binary/ascBackend "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/${BINARY_NAME}.new"
+          scp $SSH_COMMON -P "$SSH_PORT" ./binary/ascBackend "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/${BINARY_NAME}.new"
 
           # 2) 远程重启：停旧进程 → 替换二进制 → nohup 启动 → 健康检查
-          ssh $SSH_OPTS "${SSH_USER}@${SSH_HOST}" "set -e; \
+          ssh $SSH_COMMON -p "$SSH_PORT" "${SSH_USER}@${SSH_HOST}" "set -e; \
             mkdir -p '${DEPLOY_PATH}/logs'; cd '${DEPLOY_PATH}'; \
             pgrep -x '${BINARY_NAME}' | xargs -r kill 2>/dev/null || true; \
             pkill -f '^\./${BINARY_NAME}' 2>/dev/null || true; \
