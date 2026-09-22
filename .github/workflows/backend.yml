@@ -101,6 +101,11 @@ jobs:
           if ! grep -q "git-fetch-with-cli" "$HOME/.cargo/config.toml" 2>/dev/null; then
             printf '[net]\ngit-fetch-with-cli = true\nretry = 10\n' >> "$HOME/.cargo/config.toml"
           fi
+          #    清理上次部署遗留的构建进程（SSH 断连会留下孤儿 cargo/rustc/git 持有包缓存锁，导致本次构建卡死）
+          pkill -x cargo 2>/dev/null || true
+          pkill -x rustc 2>/dev/null || true
+          pkill -x git 2>/dev/null || true
+          sleep 1
           BUILD_OK=0
           for i in 1 2 3; do
             if cargo build --release; then BUILD_OK=1; break; fi
