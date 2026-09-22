@@ -100,10 +100,10 @@ jobs:
           mkdir -p "$HOME/.cargo"
           if ! grep -q "git-fetch-with-cli" "$HOME/.cargo/config.toml" 2>/dev/null; then
             cat >> "$HOME/.cargo/config.toml" <<'EOF'
-[net]
-git-fetch-with-cli = true
-retry = 10
-EOF
+          [net]
+          git-fetch-with-cli = true
+           retry = 10
+           EOF
           fi
           BUILD_OK=0
           for i in 1 2 3; do
