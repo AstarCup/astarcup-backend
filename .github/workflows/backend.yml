@@ -86,7 +86,32 @@ jobs:
           cd "${REPO_PATH}/ascBackend"
 
           # 3) 服务器上构建 release
-          cargo build --release
+          #    GitHub HTTPS 直连不稳：先探测 ssh.github.com:443（SSH over 443 通道），
+          #    可达才用 insteadOf 把 https://github.com/ 重写为 SSH 拉 git 依赖；否则回退 HTTPS
+          mkdir -p "$HOME/.ssh"
+          if timeout 10 bash -c 'exec 3<>/dev/tcp/ssh.github.com/443' 2>/dev/null; then
+            git config --global url."ssh://git@ssh.github.com:443/".insteadOf "https://github.com/"
+            export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+            echo "github-ssh:443 reachable -> use SSH to fetch git deps"
+          else
+            echo "github-ssh:443 unreachable -> keep HTTPS"
+          fi
+          #    网络优化：cargo 用系统 git 拉取 git 依赖（libgit2 直连 GitHub 易 SSL 失败），加大重试
+          mkdir -p "$HOME/.cargo"
+          if ! grep -q "git-fetch-with-cli" "$HOME/.cargo/config.toml" 2>/dev/null; then
+            cat >> "$HOME/.cargo/config.toml" <<'EOF'
+[net]
+git-fetch-with-cli = true
+retry = 10
+EOF
+          fi
+          BUILD_OK=0
+          for i in 1 2 3; do
+            if cargo build --release; then BUILD_OK=1; break; fi
+            echo "cargo build failed (try ${i}/3), retrying in 10s..."
+            sleep 10
+          done
+          if [ "$BUILD_OK" != "1" ]; then echo "build-failed"; exit 1; fi
 
           # 4) 复制二进制到部署目录
           mkdir -p "${DEPLOY_PATH}"
