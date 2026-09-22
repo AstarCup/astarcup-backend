@@ -66,12 +66,11 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ascBackend' }}
           BINARY_NAME: ${{ vars.BINARY_NAME || 'ascBackend' }}
           RUN_ARGS: ${{ vars.RUN_ARGS || 'dev' }}
-          APP_PORT: ${{ secrets.APP_PORT || '4000' }}
           SCREEN_NAME: ${{ vars.SCREEN_NAME || 'asc' }}
         if: env.SSH_HOST != '' && env.SSH_USER != '' && env.SSH_KEY != ''
         run: |
           set -euo pipefail
-          echo "Deploy config => user:${SSH_USER} host:${SSH_HOST} port:${SSH_PORT} path:${DEPLOY_PATH} binary:${BINARY_NAME} args:${RUN_ARGS} appPort:${APP_PORT} screen:${SCREEN_NAME}"
+          echo "Deploy config => user:${SSH_USER} host:${SSH_HOST} port:${SSH_PORT} path:${DEPLOY_PATH} binary:${BINARY_NAME} args:${RUN_ARGS} screen:${SCREEN_NAME}"
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
@@ -81,19 +80,31 @@ jobs:
           # 1) 上传新二进制（临时文件名 .new，避免覆盖运行中的文件）
           scp $SSH_COMMON -P "$SSH_PORT" ./binary/ascBackend "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/${BINARY_NAME}.new"
 
-          # 2) 远程重启：停旧进程 → 替换二进制 → 在 screen 会话内启动 → 健康检查
-          ssh $SSH_COMMON -p "$SSH_PORT" "${SSH_USER}@${SSH_HOST}" "set -e; \
-            mkdir -p '${DEPLOY_PATH}/logs'; cd '${DEPLOY_PATH}'; \
-            pgrep -x '${BINARY_NAME}' | xargs -r kill 2>/dev/null || true; \
-            pkill -f '^\./${BINARY_NAME}' 2>/dev/null || true; \
-            sleep 1; \
-            mv -f '${BINARY_NAME}.new' '${BINARY_NAME}'; \
-            chmod +x '${BINARY_NAME}'; \
-            screen -S '${SCREEN_NAME}' -X quit 2>/dev/null || true; \
-            sleep 1; \
-            screen -dmS '${SCREEN_NAME}' sh -c 'cd ${DEPLOY_PATH} && exec ./${BINARY_NAME} ${RUN_ARGS}'; \
-            sleep 2; \
-            curl -s -o /dev/null -w 'health:%{http_code}\n' http://localhost:${APP_PORT}/api/auth/me || echo 'health-check-failed'"
+          # 2) 生成远程部署脚本（用 heredoc，避免多层引号转义问题）
+          cat > /tmp/asc-deploy.sh <<EOF
+          set -e
+          mkdir -p "${DEPLOY_PATH}/logs"
+          cd "${DEPLOY_PATH}"
+          # 停掉旧后端进程
+          pgrep -x "${BINARY_NAME}" | xargs -r kill 2>/dev/null || true
+          pkill -f "^\./${BINARY_NAME}" 2>/dev/null || true
+          sleep 1
+          # 替换二进制
+          mv -f "${BINARY_NAME}.new" "${BINARY_NAME}"
+          chmod +x "${BINARY_NAME}"
+          # 清理所有同名 screen 会话（可能存在多个，逐个按完整会话名退出）
+          screen -ls "${SCREEN_NAME}" | awk '\$1 ~ /^[0-9]+\./ {print \$1}' | while read -r s; do screen -S "\$s" -X quit 2>/dev/null || true; done
+          sleep 1
+          # 在 screen 会话内启动后端
+          screen -dmS "${SCREEN_NAME}" sh -c 'cd ${DEPLOY_PATH} && exec ./${BINARY_NAME} ${RUN_ARGS}'
+          sleep 2
+          # 健康检查（直接请求公网地址）
+          curl -s -o /dev/null -w 'health:%{http_code}\n' "https://rino.ink/api" || echo 'health-check-failed'
+          EOF
+
+          # 3) 上传脚本并执行（脚本内含 .env 同目录、无需交互）
+          scp $SSH_COMMON -P "$SSH_PORT" /tmp/asc-deploy.sh "${SSH_USER}@${SSH_HOST}:/tmp/asc-deploy.sh"
+          ssh $SSH_COMMON -p "$SSH_PORT" "${SSH_USER}@${SSH_HOST}" "bash /tmp/asc-deploy.sh && rm -f /tmp/asc-deploy.sh"
 
       - name: Warn if SSH secrets not configured
         env:
