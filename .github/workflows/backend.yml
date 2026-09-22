@@ -63,7 +63,7 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/ascBackend' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ascBackend' }}
           BINARY_NAME: ${{ vars.BINARY_NAME || 'ascBackend' }}
           RUN_ARGS: ${{ vars.RUN_ARGS || 'dev' }}
           APP_PORT: ${{ vars.APP_PORT || '4000' }}
