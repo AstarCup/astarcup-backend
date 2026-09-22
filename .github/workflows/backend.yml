@@ -1,182 +1,135 @@
-name: Backend Build & Deploy (on server)
+name: Backend Build & Deploy
 
-# 在服务器上构建并部署（避免 CI 上传二进制慢）
-# push 到 master/main 时触发；需要 SSH secrets + 服务器 root/免密 sudo
 on:
   push:
-    branches: [main, master]
+    branches: [master, main]
   pull_request:
-    branches: [main, master]
+    branches: [master, main]
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  # PR 仅做编译检查（不部署），快速验证代码可编译
+  # PR：仅验证可编译，不部署
   check:
-    name: Cargo check (CI)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ascBackend
     steps:
       - uses: actions/checkout@v4
-      - name: Install system dependencies
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install deps
         run: |
           sudo apt-get update
           sudo apt-get install -y libpq-dev libssl-dev pkg-config
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ascBackend
       - name: Cargo check
-        run: cargo check
+        run: cargo check --manifest-path ascBackend/Cargo.toml
 
+  # 推送 master/main：CI 构建 release 二进制 -> scp 上传 -> 服务器 systemd 重启
   deploy:
-    name: Build & deploy on server (SSH)
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST || '' }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+      SSH_USER: ${{ secrets.SSH_USER || '' }}
+      SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY || '' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ascBackend' }}
+      BINARY_NAME: ${{ vars.BINARY_NAME || 'ascBackend' }}
+      RUN_ARGS: ${{ vars.RUN_ARGS || 'dev' }}
+      APP_PORT: ${{ secrets.APP_PORT || '4000' }}
+      UNIT_NAME: ${{ vars.UNIT_NAME || 'ascBackend' }}
     steps:
-      - name: Deploy via SSH
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ascBackend' }}
-          REPO_URL: ${{ secrets.REPO_URL || 'https://github.com/AstarCup/astracup-backend.git' }}
-          REPO_PATH: ${{ vars.REPO_PATH || '/opt/astracup-backend' }}
-          BRANCH: ${{ vars.BRANCH || 'master' }}
-          BINARY_NAME: ${{ vars.BINARY_NAME || 'ascBackend' }}
-          RUN_ARGS: ${{ vars.RUN_ARGS || 'dev' }}
-          UNIT_NAME: ${{ vars.UNIT_NAME || 'ascBackend.service' }}
-          SCREEN_NAME: ${{ vars.SCREEN_NAME || 'asc' }}
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev libssl-dev pkg-config
+      - name: Build release
+        run: cargo build --release --manifest-path ascBackend/Cargo.toml
+
+      - name: Warn if SSH not configured
+        if: env.SSH_HOST == '' || env.SSH_USER == '' || env.SSH_KEY == ''
+        run: echo "::warning::SSH secrets (SSH_HOST / SSH_USER / SSH_PRIVATE_KEY) 未配置，跳过自动部署。请在仓库 Settings → Secrets and variables → Actions 中配置。"
+
+      - name: Deploy to server
         if: env.SSH_HOST != '' && env.SSH_USER != '' && env.SSH_KEY != ''
         run: |
           set -euo pipefail
-          echo "Deploy config => user:${SSH_USER} host:${SSH_HOST} port:${SSH_PORT} path:${DEPLOY_PATH} repo:${REPO_PATH} branch:${BRANCH} unit:${UNIT_NAME}"
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          SSH_COMMON="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=180 -o TCPKeepAlive=yes -o ConnectTimeout=30 -i ~/.ssh/deploy_key"
 
-          # 生成远程构建部署脚本（引号 heredoc：原样写入，参数通过环境变量传入）
-          cat > /tmp/asc-deploy.sh <<'SCRIPT_EOF'
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi
+          echo "Deploy config => user:${SSH_USER} host:${SSH_HOST} port:${SSH_PORT} path:${DEPLOY_PATH} binary:${BINARY_NAME} args:${RUN_ARGS} appPort:${APP_PORT} unit:${UNIT_NAME}"
 
-          # 1) 安装构建依赖与 Rust 工具链（幂等）
-          if ! command -v cargo >/dev/null 2>&1; then
-            $SUDO apt-get update
-            $SUDO apt-get install -y curl build-essential git libpq-dev libssl-dev pkg-config screen
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$HOME/.bashrc" || true
-          fi
-          export PATH="$HOME/.cargo/bin:$PATH"
-
-          # 2) 拉取 / 克隆源码
-          if [ ! -d "${REPO_PATH}/.git" ]; then
-            mkdir -p "$(dirname "${REPO_PATH}")"
-            git clone "${REPO_URL}" "${REPO_PATH}"
-          fi
-          cd "${REPO_PATH}"
-          git fetch origin
-          git checkout "${BRANCH}" 2>/dev/null || git checkout -b "${BRANCH}" "origin/${BRANCH}" 2>/dev/null || true
-          git reset --hard "origin/${BRANCH}"
-          cd "${REPO_PATH}/ascBackend"
-
-          # 3) 服务器上构建 release
-          #    GitHub HTTPS 直连不稳：先探测 ssh.github.com:443（SSH over 443 通道），
-          #    可达才用 insteadOf 把 https://github.com/ 重写为 SSH 拉 git 依赖；否则回退 HTTPS
+          # 准备 SSH key
           mkdir -p "$HOME/.ssh"
-          if timeout 10 bash -c 'exec 3<>/dev/tcp/ssh.github.com/443' 2>/dev/null; then
-            git config --global url."ssh://git@ssh.github.com:443/".insteadOf "https://github.com/"
-            export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
-            echo "github-ssh:443 reachable -> use SSH to fetch git deps"
-          else
-            echo "github-ssh:443 unreachable -> keep HTTPS"
-          fi
-          #    网络优化：cargo 用系统 git 拉取 git 依赖（libgit2 直连 GitHub 易 SSL 失败），加大重试
-          mkdir -p "$HOME/.cargo"
-          if ! grep -q "git-fetch-with-cli" "$HOME/.cargo/config.toml" 2>/dev/null; then
-            printf '[net]\ngit-fetch-with-cli = true\nretry = 10\n' >> "$HOME/.cargo/config.toml"
-          fi
-          #    crates.io 索引走清华 TUNA 镜像（国内直连 crates.io 慢/超时）
-          if ! grep -q "mirrors.tuna.tsinghua.edu.cn" "$HOME/.cargo/config.toml" 2>/dev/null; then
-            printf '\n[source.crates-io]\nreplace-with = "tuna"\n\n[source.tuna]\nregistry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"\n' >> "$HOME/.cargo/config.toml"
-          fi
-          #    清理上次部署遗留的构建进程（SSH 断连会留下孤儿 cargo/rustc/git 持有包缓存锁，导致本次构建卡死）
-          pkill -x cargo 2>/dev/null || true
-          pkill -x rustc 2>/dev/null || true
-          pkill -x git 2>/dev/null || true
-          sleep 1
-          BUILD_OK=0
-          for i in 1 2 3; do
-            if cargo build --release; then BUILD_OK=1; break; fi
-            echo "cargo build failed (try ${i}/3), retrying in 10s..."
-            sleep 10
-          done
-          if [ "$BUILD_OK" != "1" ]; then echo "build-failed"; exit 1; fi
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          SSH_COMMON="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $HOME/.ssh/deploy_key"
 
-          # 4) 复制二进制到部署目录
-          mkdir -p "${DEPLOY_PATH}"
-          cp target/release/ascBackend "${DEPLOY_PATH}/${BINARY_NAME}"
-          chmod +x "${DEPLOY_PATH}/${BINARY_NAME}"
+          # 1) 上传二进制
+          echo "== scp upload =="
+          scp $SSH_COMMON -P "$SSH_PORT" ascBackend/target/release/ascBackend "${SSH_USER}@${SSH_HOST}:/tmp/ascBackend.new"
 
-          # 5) 停掉旧的 screen/nohup 后端进程（避免端口冲突）
-          pgrep -x "${BINARY_NAME}" | xargs -r kill 2>/dev/null || true
-          pkill -f "^\./${BINARY_NAME}" 2>/dev/null || true
-          screen -ls "${SCREEN_NAME}" 2>/dev/null | awk '$1 ~ /^[0-9]+\./ {print $1}' | while read -r s; do screen -S "$s" -X quit 2>/dev/null || true; done || true
-          sleep 1
+          # 2) 服务器安装 + systemd 重启
+          echo "== remote install =="
+          ssh $SSH_COMMON -p "$SSH_PORT" "${SSH_USER}@${SSH_HOST}" "SUDO=''; [ \"\$(id -u)\" != '0' ] && SUDO='sudo'; \$SUDO bash -s" <<EOF
+          set -euo pipefail
+          BINARY_NAME='${BINARY_NAME}'
+          DEPLOY_PATH='${DEPLOY_PATH}'
+          RUN_ARGS='${RUN_ARGS}'
+          APP_PORT='${APP_PORT}'
+          UNIT_NAME='${UNIT_NAME}'
 
-          # 6) 写入 systemd unit 并重启（幂等）
-          $SUDO tee "/etc/systemd/system/${UNIT_NAME}" > /dev/null <<UNIT_EOF
+          echo "== 安装二进制到 \${DEPLOY_PATH} =="
+          mkdir -p "\${DEPLOY_PATH}"
+          chmod +x /tmp/ascBackend.new
+          mv -f /tmp/ascBackend.new "\${DEPLOY_PATH}/\${BINARY_NAME}"
+          chmod +x "\${DEPLOY_PATH}/\${BINARY_NAME}"
+
+          echo "== 停旧进程 =="
+          pkill -f "^\./\${BINARY_NAME}" 2>/dev/null || true
+          pkill -f "\${BINARY_NAME}" 2>/dev/null || true
+
+          echo "== 写入 systemd unit =="
+          cat > /etc/systemd/system/\${UNIT_NAME}.service <<UNIT_EOF
           [Unit]
-          Description=AstraCup Backend
+          Description=Astra Cup Backend
           After=network.target
 
           [Service]
           Type=simple
-          WorkingDirectory=${DEPLOY_PATH}
-          ExecStart=${DEPLOY_PATH}/${BINARY_NAME} ${RUN_ARGS}
+          WorkingDirectory=\${DEPLOY_PATH}
+          ExecStart=\${DEPLOY_PATH}/\${BINARY_NAME} \${RUN_ARGS}
           Restart=on-failure
           RestartSec=3
+          EnvironmentFile=\${DEPLOY_PATH}/.env
 
           [Install]
           WantedBy=multi-user.target
           UNIT_EOF
 
-          $SUDO systemctl daemon-reload
-          $SUDO systemctl enable "${UNIT_NAME}" >/dev/null 2>&1 || true
-          $SUDO systemctl restart "${UNIT_NAME}"
-          sleep 3
+          systemctl daemon-reload
+          systemctl enable \${UNIT_NAME} 2>/dev/null || true
+          systemctl restart \${UNIT_NAME} || { echo "service:restart-failed"; journalctl -u \${UNIT_NAME} -n 30 --no-pager; exit 1; }
 
-          if [ "$($SUDO systemctl is-active "${UNIT_NAME}")" = "active" ]; then
+          sleep 2
+          if systemctl is-active --quiet \${UNIT_NAME}; then
             echo "service:active"
           else
             echo "service:inactive"
-            $SUDO journalctl -u "${UNIT_NAME}" -n 30 --no-pager 2>/dev/null | tail -n 30 || true
+            journalctl -u \${UNIT_NAME} -n 30 --no-pager
+            exit 1
           fi
 
-          # 7) 健康检查（带重试，避免服务启动慢导致误报 502）
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://rino.ink/api" || true)
-            case "$code" in
-              200|401|403|404) echo "health:${code} (try ${i})"; break;;
-              *) echo "health:${code} (try ${i}), retrying..."; sleep 3;;
-            esac
-            if [ "$i" = "10" ]; then echo "health-check-failed"; exit 1; fi
+          echo "== 健康检查 =="
+          for i in 1 2 3 4 5; do
+            CODE=\$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:\${APP_PORT}/api/auth/me" || echo 000)
+            echo "health:\${CODE}"
+            [ "\${CODE}" != "000" ] && exit 0
+            sleep 2
           done
-          SCRIPT_EOF
-
-          # 上传脚本并以环境变量方式执行
-          scp $SSH_COMMON -P "$SSH_PORT" /tmp/asc-deploy.sh "${SSH_USER}@${SSH_HOST}:/tmp/asc-deploy.sh"
-          ssh $SSH_COMMON -p "$SSH_PORT" "${SSH_USER}@${SSH_HOST}" "REPO_URL='$REPO_URL' REPO_PATH='$REPO_PATH' BRANCH='$BRANCH' DEPLOY_PATH='$DEPLOY_PATH' BINARY_NAME='$BINARY_NAME' RUN_ARGS='$RUN_ARGS' UNIT_NAME='$UNIT_NAME' SCREEN_NAME='$SCREEN_NAME' bash /tmp/asc-deploy.sh && rm -f /tmp/asc-deploy.sh"
-
-      - name: Warn if SSH secrets not configured
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        if: env.SSH_HOST == '' || env.SSH_USER == '' || env.SSH_KEY == ''
-        run: echo "::warning::SSH secrets (SSH_HOST / SSH_USER / SSH_PRIVATE_KEY) 未配置，跳过自动部署。请在仓库 Settings → Secrets and variables → Actions 中配置。"
+          echo "health:unreachable"
+          exit 1
+          EOF
