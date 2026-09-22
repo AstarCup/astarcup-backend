@@ -1,11 +1,12 @@
-name: Backend Build (Linux x86_64)
+name: Backend Build & Deploy (Linux x86_64)
 
 # 仅针对 Linux x86_64 构建后端（ubuntu-latest = x86_64 Linux）
+# push 到 master/main 时构建并自动部署到服务器（需配置 SSH secrets）
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -42,3 +43,53 @@ jobs:
           name: ascBackend-linux-x86_64
           path: ascBackend/target/release/ascBackend
           if-no-files-found: error
+
+  deploy:
+    name: Deploy to server (SSH)
+    needs: build
+    # 仅 push / 手动触发时部署（pull_request 不部署）
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ascBackend-linux-x86_64
+          path: ./binary
+
+      - name: Deploy via SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/ascBackend' }}
+          BINARY_NAME: ${{ vars.BINARY_NAME || 'ascBackend' }}
+          RUN_ARGS: ${{ vars.RUN_ARGS || 'dev' }}
+          APP_PORT: ${{ vars.APP_PORT || '4000' }}
+        if: env.SSH_HOST != '' && env.SSH_USER != '' && env.SSH_KEY != ''
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/deploy_key -p $SSH_PORT"
+
+          # 1) 上传新二进制（临时文件名 .new，避免覆盖运行中的文件）
+          scp $SSH_OPTS ./binary/ascBackend "${SSH_USER}@${SSH_HOST}:${DEPLOY_PATH}/${BINARY_NAME}.new"
+
+          # 2) 远程重启：停旧进程 → 替换二进制 → nohup 启动 → 健康检查
+          ssh $SSH_OPTS "${SSH_USER}@${SSH_HOST}" "set -e; \
+            mkdir -p '${DEPLOY_PATH}/logs'; cd '${DEPLOY_PATH}'; \
+            pgrep -x '${BINARY_NAME}' | xargs -r kill 2>/dev/null || true; \
+            pkill -f '^\./${BINARY_NAME}' 2>/dev/null || true; \
+            sleep 1; \
+            mv -f '${BINARY_NAME}.new' '${BINARY_NAME}'; \
+            chmod +x '${BINARY_NAME}'; \
+            setsid nohup './${BINARY_NAME}' ${RUN_ARGS} >> logs/backend.log 2>&1 < /dev/null & \
+            sleep 2; \
+            curl -s -o /dev/null -w 'health:%{http_code}\n' http://localhost:${APP_PORT}/api/auth/me || echo 'health-check-failed'"
+
+      - name: Warn if SSH secrets not configured
+        if: env.SSH_HOST == '' || env.SSH_USER == '' || env.SSH_KEY == ''
+        run: echo "::warning::SSH secrets (SSH_HOST / SSH_USER / SSH_PRIVATE_KEY) 未配置，跳过自动部署。请在仓库 Settings → Secrets and variables → Actions 中配置。"
