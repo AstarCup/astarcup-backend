@@ -57,7 +57,7 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          SSH_COMMON="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/deploy_key"
+          SSH_COMMON="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=180 -o TCPKeepAlive=yes -o ConnectTimeout=30 -i ~/.ssh/deploy_key"
 
           # 生成远程构建部署脚本（引号 heredoc：原样写入，参数通过环境变量传入）
           cat > /tmp/asc-deploy.sh <<'SCRIPT_EOF'
