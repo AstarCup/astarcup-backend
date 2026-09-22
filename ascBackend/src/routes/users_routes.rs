@@ -460,6 +460,7 @@ async fn admin_list_users(
                 users::registration_status,
                 users::created_at,
                 users::season,
+                users::qq,
             ))
             .order(users::created_at.desc())
             .load::<(
@@ -470,13 +471,14 @@ async fn admin_list_users(
                 RegistrationStatus,
                 chrono::NaiveDateTime,
                 Option<Vec<String>>,
+                Option<String>,
             )>(conn)
             .map_err(AppError::from)
     })
     .await?;
     let users_json: Vec<Value> = list
         .into_iter()
-        .map(|(osu_id, username, avatar, group, reg, created, season)| {
+        .map(|(osu_id, username, avatar, group, reg, created, season, qq)| {
             json!({
                 "osuId": osu_id,
                 "username": username,
@@ -485,6 +487,7 @@ async fn admin_list_users(
                 "registrationStatus": reg.as_str(),
                 "createdAt": created.and_utc().to_rfc3339(),
                 "season": season,
+                "qq": qq,
             })
         })
         .collect();
