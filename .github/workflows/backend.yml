@@ -66,7 +66,7 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/ascBackend' }}
           BINARY_NAME: ${{ vars.BINARY_NAME || 'ascBackend' }}
           RUN_ARGS: ${{ vars.RUN_ARGS || 'dev' }}
-          APP_PORT: ${{ vars.APP_PORT || '4000' }}
+          APP_PORT: ${{ secrets.APP_PORT || '4000' }}
         if: env.SSH_HOST != '' && env.SSH_USER != '' && env.SSH_KEY != ''
         run: |
           set -euo pipefail
