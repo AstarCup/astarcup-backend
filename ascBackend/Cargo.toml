@@ -18,7 +18,8 @@ r2d2 = "0.8"
 
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
-jsonwebtoken = "9"
+# jsonwebtoken 10.x 必须显式启用恰好一个 crypto provider（rust_crypto），否则运行时验签 panic
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 
 zip = "2"
 regex = "1"

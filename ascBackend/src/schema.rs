@@ -48,6 +48,8 @@ table! {
         gu_server_bind_at -> Nullable<Timestamp>,
         #[sql_name = "guRefreshToken"]
         gu_refresh_token -> Nullable<Varchar>,
+        // QQ 联系方式（报名可选填写）
+        qq -> Nullable<Varchar>,
     }
 }
 
