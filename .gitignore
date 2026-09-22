@@ -1,5 +1,2 @@
 target
 .env
-pgdata
-ascBackend/logs/*
-.trae
