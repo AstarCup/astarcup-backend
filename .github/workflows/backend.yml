@@ -99,11 +99,7 @@ jobs:
           #    网络优化：cargo 用系统 git 拉取 git 依赖（libgit2 直连 GitHub 易 SSL 失败），加大重试
           mkdir -p "$HOME/.cargo"
           if ! grep -q "git-fetch-with-cli" "$HOME/.cargo/config.toml" 2>/dev/null; then
-            cat >> "$HOME/.cargo/config.toml" <<'EOF'
-          [net]
-          git-fetch-with-cli = true
-           retry = 10
-           EOF
+            printf '[net]\ngit-fetch-with-cli = true\nretry = 10\n' >> "$HOME/.cargo/config.toml"
           fi
           BUILD_OK=0
           for i in 1 2 3; do
