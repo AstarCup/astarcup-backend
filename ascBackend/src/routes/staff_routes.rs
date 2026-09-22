@@ -20,6 +20,7 @@ use crate::schema::{
     users,
 };
 use crate::state::AppState;
+use crate::util::storage_path;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -163,7 +164,7 @@ async fn stats(
     State(state): State<AppState>,
     _admin: crate::auth::AdminUser,
 ) -> ApiResult<Json<Value>> {
-    let data = run_db(&state.pool, |conn| {
+    let (mut data, seasons) = run_db(&state.pool, move |conn| {
         let all_users = users::table.load::<User>(conn).map_err(AppError::from)?;
         let schedules = match_schedules::table
             .load::<MatchSchedule>(conn)
@@ -211,8 +212,13 @@ async fn stats(
         let pending_maps: Vec<&MapSelection> =
             maps.iter().filter(|m| !m.approved && !m.padding).collect();
 
-        // 赛季列表取自全部选图（含待审/测图），避免某赛季暂无已审核图时整季统计缺失
+        // 赛季列表 = 选图赛季 ∪ 选手赛季
         let mut seasons: Vec<String> = maps.iter().filter_map(|m| m.season.clone()).collect();
+        for u in &all_users {
+            if let Some(ss) = &u.season {
+                seasons.extend(ss.iter().cloned());
+            }
+        }
         seasons.sort();
         seasons.dedup();
 
@@ -295,17 +301,88 @@ async fn stats(
             }
         }
 
-        Ok(json!({
-            "approvedPlayers": approved_players,
-            "matchRooms": rooms.len(),
-            "mappoolSeasons": seasons.len(),
-            "replayCount": replay_count,
-            "totalRegistrations": all_users.len(),
-            "totalSchedules": schedules.len(),
-            "seasonMappoolStats": Value::Object(season_stats),
-            "tournamentSettings": tournament_settings_display,
-        }))
+        // 每赛季选手统计（season 数组包含该赛季的用户）
+        let mut season_player_stats = serde_json::Map::new();
+        for season in &seasons {
+            let in_season: Vec<&User> = all_users
+                .iter()
+                .filter(|u| {
+                    u.season
+                        .as_ref()
+                        .map(|ss| ss.iter().any(|s| s == season))
+                        .unwrap_or(false)
+                })
+                .collect();
+            let approved = in_season
+                .iter()
+                .filter(|u| u.registration_status == crate::enums::RegistrationStatus::Approved)
+                .count() as i64;
+            season_player_stats.insert(
+                season.clone(),
+                json!({
+                    "totalRegistrations": in_season.len() as i64,
+                    "approvedPlayers": approved,
+                    "unapprovedPlayers": in_season.len() as i64 - approved,
+                }),
+            );
+        }
+
+        Ok((
+            json!({
+                "approvedPlayers": approved_players,
+                "matchRooms": rooms.len(),
+                "mappoolSeasons": seasons.len(),
+                "replayCount": replay_count,
+                "totalRegistrations": all_users.len(),
+                "totalSchedules": schedules.len(),
+                "seasonMappoolStats": Value::Object(season_stats),
+                "seasonStats": Value::Object(season_player_stats),
+                "tournamentSettings": tournament_settings_display,
+            }),
+            seasons,
+        ))
     })
     .await?;
+
+    // 每赛季回放数：扫描对应存储目录下的 .osr 文件
+    if let Some(map) = data["seasonStats"].as_object_mut() {
+        for season in &seasons {
+            let cnt = season_replay_count(&state, season).await?;
+            if let Some(v) = map.get_mut(season) {
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert("replayCount".into(), json!(cnt));
+                }
+            }
+        }
+    }
+
     Ok(ok(data))
+}
+
+/// 统计某赛季存储目录下所有 .osr 回放文件数量（递归）
+async fn season_replay_count(state: &AppState, season: &str) -> Result<i64, AppError> {
+    let base = storage_path(&state.config, season)?;
+    if !base.exists() {
+        return Ok(0);
+    }
+    let mut count = 0i64;
+    let mut dirs = vec![base];
+    while let Some(dir) = dirs.pop() {
+        let mut entries = tokio::fs::read_dir(&dir)
+            .await
+            .map_err(|e| AppError::internal(format!("读取目录失败: {e}")))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| AppError::internal(format!("读取目录失败: {e}")))?
+        {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("osr") {
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
 }
