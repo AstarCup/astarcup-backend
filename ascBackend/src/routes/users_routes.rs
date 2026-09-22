@@ -112,6 +112,8 @@ struct RegisterBody {
     cover_url: Option<String>,
     #[serde(rename = "cover_id", default)]
     cover_id: Option<String>,
+    #[serde(default)]
+    qq: Option<String>,
 }
 
 async fn register(
@@ -122,6 +124,9 @@ async fn register(
         return Err(AppError::bad_request(
             "缺少必要字段 (osuId, username, country)",
         ));
+    }
+    if body.qq.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        return Err(AppError::bad_request("请填写 QQ 号"));
     }
 
     // 报名门槛：必须先绑定 g0v0 服务器账号
@@ -171,6 +176,7 @@ async fn register(
                     users::cover_custom_url.eq(body.cover_custom_url),
                     users::cover_url.eq(body.cover_url),
                     users::cover_id.eq(body.cover_id),
+                    users::qq.eq(body.qq),
                     users::updated_at.eq(now),
                 ))
                 .get_result::<User>(conn)
@@ -199,6 +205,7 @@ async fn register(
                     users::cover_custom_url.eq(&body.cover_custom_url),
                     users::cover_url.eq(&body.cover_url),
                     users::cover_id.eq(&body.cover_id),
+                    users::qq.eq(&body.qq),
                     users::created_at.eq(now),
                     users::updated_at.eq(now),
                 ))
