@@ -173,6 +173,7 @@ pub(crate) async fn insert_schedule_from_matchup(
     let p1u = mu.player1_username.clone();
     let p2 = mu.player2_osu_id.clone();
     let p2u = mu.player2_username.clone();
+    let season = crate::routes::schedules_routes::current_season(state).await?;
     run_db(&state.pool, move |conn| {
         let now = Utc::now().naive_utc();
         diesel::insert_into(match_schedules::table)
@@ -182,6 +183,7 @@ pub(crate) async fn insert_schedule_from_matchup(
                 match_schedules::player1_username.eq(&p1u),
                 match_schedules::player2_osu_id.eq(&p2),
                 match_schedules::player2_username.eq(&p2u),
+                match_schedules::season.eq(&season),
                 match_schedules::red_score.eq(0),
                 match_schedules::blue_score.eq(0),
                 match_schedules::status.eq(ScheduleStatus::Pending),

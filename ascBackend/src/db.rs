@@ -15,13 +15,13 @@ pub fn init_pool() -> DbPool {
     let pool = r2d2::Pool::builder()
         .build(manager)
         .expect("Failed to create db pool");
-    ensure_bot_tables(&pool);
+    ensure_schema(&pool);
     pool
 }
 
-/// 项目暂无 migration 框架，启动时幂等创建 Bot 身份绑定表。
+/// 项目暂无 migration 框架，启动时幂等补齐 Bot 表和赛程赛季字段。
 /// 失败只记录警告，不阻塞主服务启动（其余接口仍可使用）。
-fn ensure_bot_tables(pool: &DbPool) {
+fn ensure_schema(pool: &DbPool) {
     const DDL: &[&str] = &[
         "CREATE TABLE IF NOT EXISTS bot_platform_bindings (
             id SERIAL PRIMARY KEY,
@@ -60,15 +60,18 @@ fn ensure_bot_tables(pool: &DbPool) {
         )",
         "CREATE INDEX IF NOT EXISTS bot_bind_links_identity_idx
             ON bot_bind_links (platform, platform_user_id)",
+        "ALTER TABLE \"MatchSchedule\" ADD COLUMN IF NOT EXISTS \"season\" TEXT",
+        "CREATE INDEX IF NOT EXISTS \"MatchSchedule_season_idx\"
+            ON \"MatchSchedule\" (\"season\")",
     ];
 
     let Ok(mut conn) = pool.get() else {
-        tracing::warn!("无法获取数据库连接，跳过 bot 表初始化");
+        tracing::warn!("无法获取数据库连接，跳过 schema 初始化");
         return;
     };
     for stmt in DDL {
         if let Err(e) = diesel::sql_query(*stmt).execute(&mut conn) {
-            tracing::warn!("初始化 bot 表失败: {e}");
+            tracing::warn!("schema 初始化失败: {e}");
         }
     }
 }

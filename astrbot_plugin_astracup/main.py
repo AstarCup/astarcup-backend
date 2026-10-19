@@ -163,7 +163,9 @@ class AstracupClient:
         self,
         platform: str,
         platform_user_id: str,
+        *,
         status: str | None = None,
+        season: str | None = None,
         limit: int = 30,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -172,6 +174,8 @@ class AstracupClient:
         }
         if status:
             params["status"] = status
+        if season:
+            params["season"] = season
         return await self.request("GET", "/api/bot/schedules", params=params)
 
     async def record_score(
@@ -183,6 +187,7 @@ class AstracupClient:
         red_score: int,
         blue_score: int,
         status: str | None = None,
+        season: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "platform": platform,
@@ -193,6 +198,8 @@ class AstracupClient:
         }
         if status:
             body["status"] = status
+        if season:
+            body["season"] = season
         return await self.request("POST", "/api/bot/scores", json_body=body)
 
     async def bind(
@@ -648,8 +655,10 @@ class AstracupPlugin(Star):
         next_schedule = data.get("nextSchedule")
         if next_schedule:
             room = next_schedule.get("room") or {}
+            season = next_schedule.get("season")
+            season_text = f"[{str(season).upper()}] " if season else ""
             lines.append(
-                f'下一场：赛程 #{next_schedule.get("id")} '
+                f'下一场：{season_text}赛程 #{next_schedule.get("id")} '
                 f'{next_schedule.get("player1Username", "?")}（红） vs '
                 f'{next_schedule.get("player2Username", "?")}（蓝） '
                 f'| {room.get("roomName", "未安排房间")} '
@@ -690,8 +699,9 @@ class AstracupPlugin(Star):
         red_score: int = -1,
         blue_score: int = -1,
         status: str = "",
+        season: str = "",
     ):
-        """管理员录入比分：/score [赛程ID 红方 蓝方 [状态]]"""
+        """管理员录入比分：/score [赛程ID 红方 蓝方 [状态] [赛季]]"""
         platform, platform_user_id = _platform_identity(event)
         if not platform_user_id:
             yield event.plain_result("无法获取你的平台账号 ID。")
@@ -716,7 +726,7 @@ class AstracupPlugin(Star):
 
         if red < 0 or blue < 0:
             yield event.plain_result(
-                "用法：/score <赛程ID> <红方比分> <蓝方比分> [状态]"
+                "用法：/score <赛程ID> <红方比分> <蓝方比分> [状态] [赛季]"
             )
             return
 
@@ -727,6 +737,7 @@ class AstracupPlugin(Star):
             red_score=red,
             blue_score=blue,
             status=(status or "").strip() or None,
+            season=(season or "").strip() or None,
         )
         if not result.get("ok"):
             yield event.plain_result(f'记录失败：{result.get("error")}')
@@ -734,8 +745,11 @@ class AstracupPlugin(Star):
         data = result.get("data") or {}
         player1 = data.get("player1") or {}
         player2 = data.get("player2") or {}
+        season_text = (
+            f'[{str(data.get("season")).upper()}] ' if data.get("season") else ""
+        )
         yield event.plain_result(
-            f'已记录 #{data.get("scheduleId")}：'
+            f'已记录 {season_text}#{data.get("scheduleId")}：'
             f'{player1.get("username")}（红） {data.get("redScore")} : '
             f'{data.get("blueScore")} {player2.get("username")}（蓝），'
             f'状态 {data.get("status")}。\n'
@@ -783,13 +797,15 @@ class AstracupPlugin(Star):
         for s in schedules[:20]:
             player1 = s.get("player1") or {}
             player2 = s.get("player2") or {}
+            season = s.get("season")
+            season_text = str(season).upper() if season else "未标注"
             lines.append(
-                f'#{s.get("id")} {s.get("roundLabel")} {s.get("roomName")} | '
+                f'#{s.get("id")} {season_text} {s.get("roundLabel")} {s.get("roomName")} | '
                 f'{player1.get("username")}（红） {s.get("redScore")} : '
                 f'{s.get("blueScore")} {player2.get("username")}（蓝） | '
                 f'{s.get("status")} | {s.get("matchTime")}'
             )
-        lines.append("用法：/score <赛程ID> <红方比分> <蓝方比分> [状态]")
+        lines.append("用法：/score <赛程ID> <红方比分> <蓝方比分> [状态] [赛季]")
         lines.append("红方=player1，蓝方=player2；状态默认 completed。")
         return "\n".join(lines)
 
@@ -979,6 +995,10 @@ class ListSchedulesTool(FunctionTool):
                     "type": "string",
                     "description": "可选，逗号分隔：pending,confirmed,completed,cancelled",
                 },
+                "season": {
+                    "type": "string",
+                    "description": "可选赛季 ID，例如 s1 / s2",
+                },
                 "limit": {
                     "type": "integer",
                     "description": "返回条数，默认 20，最大 100",
@@ -992,6 +1012,7 @@ class ListSchedulesTool(FunctionTool):
         self,
         event: AstrMessageEvent,
         status: str = "",
+        season: str = "",
         limit: int = 20,
     ) -> str:
         platform, platform_user_id = _platform_identity(event)
@@ -1005,8 +1026,9 @@ class ListSchedulesTool(FunctionTool):
             await self.client.schedules(
                 platform,
                 platform_user_id,
-                (status or "").strip() or None,
-                limit,
+                status=(status or "").strip() or None,
+                season=(season or "").strip() or None,
+                limit=limit,
             )
         )
 
@@ -1038,6 +1060,10 @@ class RecordScoreTool(FunctionTool):
                     "type": "string",
                     "description": "可选状态：pending/confirmed/completed/cancelled，默认 completed",
                 },
+                "season": {
+                    "type": "string",
+                    "description": "可选赛季 ID；不传则保留赛程原赛季",
+                },
             },
             "required": ["schedule_id", "red_score", "blue_score"],
         }
@@ -1051,6 +1077,7 @@ class RecordScoreTool(FunctionTool):
         red_score: int,
         blue_score: int,
         status: str = "",
+        season: str = "",
     ) -> str:
         platform, platform_user_id = _platform_identity(event)
         if not platform_user_id:
@@ -1063,6 +1090,7 @@ class RecordScoreTool(FunctionTool):
                 red_score=int(red_score),
                 blue_score=int(blue_score),
                 status=(status or "").strip() or None,
+                season=(season or "").strip() or None,
             )
         )
 

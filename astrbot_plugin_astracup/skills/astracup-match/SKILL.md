@@ -38,10 +38,10 @@ description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、全局�
 | `astracup_get_settings` | 查询全局比赛设置：当前赛季/阶段、报名、PP 区间、图池公开状态 | 无 |
 | `astracup_query_mappool` | 查询公开图池（已公开且已过审） | `season`、`category` |
 | `astracup_list_rooms` | 查看房间、时间、占用与可预约状态 | `include_all`、`round_number` |
-| `astracup_list_schedules` | 管理员查看最近赛程和赛程 ID（用于录入比分） | `status`、`limit` |
+| `astracup_list_schedules` | 管理员查看最近赛程和赛程 ID（用于录入比分） | `status`、`season`、`limit` |
 | `astracup_get_player` | 查询当前绑定选手的资料、对战安排（红/蓝方）、下一场、待确认邀请 | 无 |
 | `astracup_book_room` | 以当前绑定身份预约房间 | `room_id`、`matchup_id`（必填） |
-| `astracup_record_score` | 管理员录入比分并写入后端 | `schedule_id`、`red_score`、`blue_score`、`status` |
+| `astracup_record_score` | 管理员录入比分并写入后端 | `schedule_id`、`red_score`、`blue_score`、`status`、`season` |
 | `astracup_respond_invitation` | 接受或拒绝收到的预约邀请 | `message_id`、`action` |
 
 ## 标准流程
@@ -125,14 +125,16 @@ description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、全局�
 
 1. 先确认用户是管理员。调用 `astracup_list_schedules` 获取赛程 ID；如果返回 403，说明用户不是管理员，
    直接告知“需要管理员权限”，不要重试、不要换账号、不要尝试其他写接口。
-2. 列出赛程时展示：赛程 ID、房间/轮次、`player1`（红）vs `player2`（蓝）、当前比分、状态。
-   让用户明确指认要录入哪一场。
+2. 列出赛程时展示：赛程 ID、**赛季**、房间/轮次、`player1`（红）vs `player2`（蓝）、当前比分、状态。
+   让用户明确指认要录入哪一场。必要时用 `season` 参数过滤，例如只看 `s2`。
 3. 确认比分方向：**红方 = player1，蓝方 = player2**。用户说“A 4:2 B”时，先确认 A 是否是 player1；
    不确定就让用户按 player1/player2 再说一遍。
 4. **必须在用户明确确认赛程 ID 和双方比分后才调用 `astracup_record_score`**。这是真实写操作。
 5. 状态默认 `completed`；只有用户明确要求时才传 `pending` / `confirmed` / `cancelled`。
-6. 成功后报告最终比分和状态；如果填反了，告诉用户可以用同一命令覆盖。
-7. 不要批量录入，不要替用户猜比分，不要修改 `room` 或玩家信息。
+6. 成功后报告最终比分、状态和赛季；如果填反了，告诉用户可以用同一命令覆盖。
+7. 赛季默认使用赛程创建时记录的 `current_season`。只有用户明确要求修正历史赛程时，才传 `season` 覆盖；
+   不要凭空猜赛季。
+8. 不要批量录入，不要替用户猜比分，不要修改 `room` 或玩家信息。
 
 ## 重要约束
 

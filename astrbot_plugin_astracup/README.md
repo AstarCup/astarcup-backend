@@ -81,7 +81,7 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 | `/book <房间ID>` | 查看可预约对战安排，不会创建预约 |
 | `/book <房间ID> <对战ID>` | 确认对战 ID 后预约；红方=player1，蓝方=player2 |
 | `/score` | 管理员查看最近赛程，获取赛程 ID |
-| `/score <赛程ID> <红方比分> <蓝方比分> [状态]` | 管理员录入比分；红方=player1，蓝方=player2，状态默认 `completed` |
+| `/score <赛程ID> <红方比分> <蓝方比分> [状态] [赛季]` | 管理员录入比分；红方=player1，蓝方=player2，状态默认 `completed`；赛季不传则保留原值 |
 | `/accept <消息ID>` | 接受对手发来的预约邀请 |
 | `/decline <消息ID>` | 拒绝预约邀请 |
 
@@ -90,6 +90,8 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 图池只返回 **`mappool_visible=true` 且 `approved=true`** 的图；图池未公开时不会返回任何图，只会提示“图池尚未公开”。
 
 `/score` 只允许管理员使用，写入 `match_schedules.red_score / blue_score`，并默认把状态置为 `completed`。非管理员会收到 403。
+
+新赛程创建时会自动写入当前赛季 `current_season`；历史赛程如果 `season` 为空，可以在网页 staff 页面或 `/score ... <赛季>` 补填。Bot 的赛程列表会显示 `[s2]` 这样的赛季标记。
 
 预约前必须先看对战安排：`/book <房间ID>` 只返回 `player1（红） vs player2（蓝）`、`mySide` 和 `matchupId`，不会写库；确认后发送 `/book <房间ID> <对战ID>` 才会创建预约。后端会再次校验操作者是该对战的参赛者。
 
