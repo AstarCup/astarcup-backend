@@ -26,9 +26,29 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/me", get(me))
 }
 
-/// GET /api/auth/url —— 返回 osu! 授权地址
-async fn auth_url(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    Ok(ok(json!({ "authUrl": authorize_url(&state.config) })))
+/// GET /api/auth/url?redirect=/bind?token=... —— 返回 osu! 授权地址
+#[derive(serde::Deserialize)]
+struct AuthUrlQuery {
+    redirect: Option<String>,
+}
+
+/// 只允许站内相对路径，防止开放重定向
+fn is_safe_redirect(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && !path.contains('\\')
+        && !path.chars().any(char::is_control)
+        && path.len() <= 512
+}
+
+async fn auth_url(
+    State(state): State<AppState>,
+    Query(q): Query<AuthUrlQuery>,
+) -> ApiResult<Json<Value>> {
+    let redirect = q.redirect.filter(|r| is_safe_redirect(r));
+    Ok(ok(json!({
+        "authUrl": authorize_url(&state.config, redirect.as_deref())
+    })))
 }
 
 /// GET /api/auth/callback?code=... —— OAuth 回调
@@ -63,9 +83,16 @@ async fn callback(
     }
     .await;
 
+    // OAuth state 只允许站内相对路径
+    let redirect = params
+        .get("state")
+        .map(String::as_str)
+        .filter(|s| is_safe_redirect(s))
+        .unwrap_or("/");
+
     match result {
         Ok(jwt) => {
-            let mut resp = Redirect::temporary(&format!("{frontend}/")).into_response();
+            let mut resp = Redirect::temporary(&format!("{frontend}{redirect}")).into_response();
             if let Ok(v) = header::HeaderValue::from_str(&session_cookie(&state.config, &jwt)) {
                 resp.headers_mut().append(header::SET_COOKIE, v);
             }

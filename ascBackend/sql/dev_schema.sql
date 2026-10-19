@@ -6,7 +6,7 @@ CREATE TYPE "UserGroup" AS ENUM ('player', 'admin');
 CREATE TYPE "RegistrationStatus" AS ENUM ('not_registered', 'registered', 'approved');
 CREATE TYPE "RoomStatus" AS ENUM ('open', 'full', 'closed');
 CREATE TYPE "ScheduleStatus" AS ENUM ('pending', 'confirmed', 'completed', 'cancelled');
-CREATE TYPE "MatchupStatus" AS ENUM ('available', 'scheduled', 'completed');
+CREATE TYPE "MatchupStatus" AS ENUM ('available', 'pending', 'scheduled', 'completed');
 CREATE TYPE "MessageType" AS ENUM ('match_invitation', 'system_notification', 'admin_message');
 CREATE TYPE "MessageStatus" AS ENUM ('unread', 'read', 'archived');
 CREATE TYPE "StaffRole" AS ENUM ('referee', 'commentator', 'streamer');
@@ -230,3 +230,49 @@ INSERT INTO "TournamentSetting" ("setting_key", "setting_value", "updated_at") V
     ('current_season_stage', 'registration', CURRENT_TIMESTAMP),
     ('registration_enabled', 'true', CURRENT_TIMESTAMP),
     ('mappool_visible', 'false', CURRENT_TIMESTAMP);
+
+-- ============ Bot 身份绑定 ============
+
+CREATE TABLE IF NOT EXISTS bot_platform_bindings (
+    id SERIAL PRIMARY KEY,
+    platform VARCHAR(64) NOT NULL,
+    platform_user_id VARCHAR(128) NOT NULL,
+    osu_id VARCHAR(64) NOT NULL,
+    display_name VARCHAR(128),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS bot_platform_bindings_platform_user_idx
+    ON bot_platform_bindings (platform, platform_user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS bot_platform_bindings_platform_osu_idx
+    ON bot_platform_bindings (platform, osu_id);
+CREATE INDEX IF NOT EXISTS bot_platform_bindings_osu_idx
+    ON bot_platform_bindings (osu_id);
+
+CREATE TABLE IF NOT EXISTS bot_bind_codes (
+    id SERIAL PRIMARY KEY,
+    code_hash VARCHAR(64) NOT NULL UNIQUE,
+    osu_id VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS bot_bind_codes_osu_idx
+    ON bot_bind_codes (osu_id);
+
+-- 私聊一键绑定链接
+CREATE TABLE IF NOT EXISTS bot_bind_links (
+    id SERIAL PRIMARY KEY,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    platform VARCHAR(64) NOT NULL,
+    platform_user_id VARCHAR(128) NOT NULL,
+    display_name VARCHAR(128),
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS bot_bind_links_identity_idx
+    ON bot_bind_links (platform, platform_user_id);

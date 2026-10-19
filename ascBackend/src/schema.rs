@@ -252,6 +252,42 @@ table! {
     }
 }
 
+table! {
+    bot_platform_bindings (id) {
+        id -> Int4,
+        platform -> Varchar,
+        platform_user_id -> Varchar,
+        osu_id -> Varchar,
+        display_name -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    bot_bind_codes (id) {
+        id -> Int4,
+        code_hash -> Varchar,
+        osu_id -> Varchar,
+        expires_at -> Timestamp,
+        used_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+    }
+}
+
+table! {
+    bot_bind_links (id) {
+        id -> Int4,
+        token_hash -> Varchar,
+        platform -> Varchar,
+        platform_user_id -> Varchar,
+        display_name -> Nullable<Varchar>,
+        expires_at -> Timestamp,
+        used_at -> Nullable<Timestamp>,
+        created_at -> Timestamp,
+    }
+}
+
 joinable!(match_schedules -> match_rooms (room_id));
 joinable!(match_scores -> match_schedules (schedule_id));
 joinable!(player_matchups -> match_rooms (room_id));
@@ -269,4 +305,7 @@ allow_tables_to_appear_in_same_query!(
     tournament_settings,
     map_selections,
     map_comments,
+    bot_platform_bindings,
+    bot_bind_codes,
+    bot_bind_links,
 );

@@ -42,7 +42,7 @@ pub struct User {
     pub gu_server_username: Option<String>,
     pub gu_server_bind_at: Option<NaiveDateTime>,
     pub gu_refresh_token: Option<String>,
-    // QQ 联系方式（报名可选填写）
+    // QQ 联系方式（报名可选填写；仅用于联系，不作为机器人鉴权依据）
     pub qq: Option<String>,
 }
 
@@ -482,4 +482,56 @@ impl MapComment {
             "updatedAt": self.updated_at.and_utc().to_rfc3339(),
         })
     }
+}
+
+// ============ Bot 身份绑定 ============
+
+#[derive(Debug, Queryable, Identifiable, Selectable)]
+#[diesel(table_name = bot_platform_bindings)]
+pub struct BotPlatformBinding {
+    pub id: i32,
+    pub platform: String,
+    pub platform_user_id: String,
+    pub osu_id: String,
+    pub display_name: Option<String>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+impl BotPlatformBinding {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "platform": self.platform,
+            "platformUserId": self.platform_user_id,
+            "osuId": self.osu_id,
+            "displayName": self.display_name,
+            "createdAt": self.created_at.and_utc().to_rfc3339(),
+            "updatedAt": self.updated_at.and_utc().to_rfc3339(),
+        })
+    }
+}
+
+#[derive(Debug, Queryable, Identifiable, Selectable)]
+#[diesel(table_name = bot_bind_codes)]
+pub struct BotBindCode {
+    pub id: i32,
+    pub code_hash: String,
+    pub osu_id: String,
+    pub expires_at: NaiveDateTime,
+    pub used_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Queryable, Identifiable, Selectable)]
+#[diesel(table_name = bot_bind_links)]
+pub struct BotBindLink {
+    pub id: i32,
+    pub token_hash: String,
+    pub platform: String,
+    pub platform_user_id: String,
+    pub display_name: Option<String>,
+    pub expires_at: NaiveDateTime,
+    pub used_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
 }

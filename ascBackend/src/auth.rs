@@ -218,13 +218,18 @@ pub struct OsuToken {
     pub refresh_token: Option<String>,
 }
 
-/// 生成 osu! 授权跳转 URL
-pub fn authorize_url(cfg: &Config) -> String {
-    format!(
+/// 生成 osu! 授权跳转 URL；state 用于 OAuth 完成后回跳到网站指定页面
+pub fn authorize_url(cfg: &Config, state: Option<&str>) -> String {
+    let mut url = format!(
         "https://osu.ppy.sh/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify",
         url_encode(&cfg.osu_client_id),
         url_encode(&cfg.osu_redirect_uri),
-    )
+    );
+    if let Some(state) = state {
+        url.push_str("&state=");
+        url.push_str(&url_encode(state));
+    }
+    url
 }
 
 /// 用授权 code 换取 access token
