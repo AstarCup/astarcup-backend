@@ -11,9 +11,11 @@
 //   GET  /api/bot/whoami?platform=&platformUserId=  当前平台身份绑定了谁
 //   GET  /api/bot/players?platform=&platformUserId= 选手档案 / 可预约对战 / 下一场
 //   GET  /api/bot/messages?platform=&platformUserId= 收到的消息
+//   GET  /api/bot/schedules?platform=&platformUserId= 赛程列表（管理员）
+//   POST /api/bot/scores                             记录比分（管理员）
 //   POST /api/bot/bind                              用一次性绑定码绑定平台身份
 //   POST /api/bot/bind-link                         生成私聊一键绑定链接
-//   POST /api/bot/book                              预约房间
+//   POST /api/bot/book                              预约房间（必须带 matchupId；只带 roomId 时返回对战安排）
 //   POST /api/bot/book/respond                      接受/拒绝预约邀请
 //
 // 网站侧（SessionUser）：
@@ -41,6 +43,7 @@ use sha2::{Digest, Sha256};
 use crate::db::run_db;
 use crate::enums::{
     MatchupStatus, MessageStatus, MessageType, RegistrationStatus, RoomStatus, ScheduleStatus,
+    UserGroup,
 };
 use crate::error::{ApiResult, AppError, ok, ok_msg};
 use crate::models::{
@@ -66,6 +69,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/bot/whoami", get(bot_whoami))
         .route("/api/bot/players", get(bot_player))
         .route("/api/bot/messages", get(bot_messages))
+        .route("/api/bot/schedules", get(bot_schedules))
+        .route("/api/bot/scores", post(bot_record_score))
         .route("/api/bot/bind", post(bot_bind))
         .route("/api/bot/bind-link", post(create_bot_bind_link))
         .route("/api/bot/book", post(bot_book))
@@ -346,20 +351,44 @@ fn time_allows_booking(room: &MatchRoom) -> bool {
     room.match_time > Utc::now().naive_utc() + chrono::Duration::hours(2)
 }
 
-fn opponent_of<'a>(matchup: &'a PlayerMatchup, osu_id: &str) -> (&'a str, &'a str) {
-    if matchup.player1_osu_id == osu_id {
-        (&matchup.player2_osu_id, &matchup.player2_username)
-    } else {
-        (&matchup.player1_osu_id, &matchup.player1_username)
-    }
-}
-
 fn matchup_summary(matchup: &PlayerMatchup, osu_id: &str, rooms: &HashMap<i32, Value>) -> Value {
-    let (opp_id, opp_name) = opponent_of(matchup, osu_id);
+    let is_player1 = matchup.player1_osu_id == osu_id;
+    let is_player2 = matchup.player2_osu_id == osu_id;
+    let is_participant = is_player1 || is_player2;
+    let (opponent_id, opponent_name) = if is_player1 {
+        (
+            matchup.player2_osu_id.as_str(),
+            matchup.player2_username.as_str(),
+        )
+    } else if is_player2 {
+        (
+            matchup.player1_osu_id.as_str(),
+            matchup.player1_username.as_str(),
+        )
+    } else {
+        ("", "")
+    };
+    let my_side = if is_player1 {
+        json!("red")
+    } else if is_player2 {
+        json!("blue")
+    } else {
+        Value::Null
+    };
+    let opponent = if is_participant {
+        json!({ "osuId": opponent_id, "username": opponent_name })
+    } else {
+        Value::Null
+    };
+
     json!({
         "id": matchup.id,
         "status": matchup.status.as_str(),
-        "opponent": { "osuId": opp_id, "username": opp_name },
+        "player1": { "osuId": matchup.player1_osu_id, "username": matchup.player1_username },
+        "player2": { "osuId": matchup.player2_osu_id, "username": matchup.player2_username },
+        "opponent": opponent,
+        "mySide": my_side,
+        "isParticipant": is_participant,
         "room": matchup.room_id.and_then(|id| rooms.get(&id)),
         "createdAt": matchup.created_at.and_utc().to_rfc3339(),
     })
@@ -459,6 +488,14 @@ fn ensure_can_book(user: &User) -> Result<(), AppError> {
         Ok(())
     } else {
         Err(AppError::forbidden("该账号尚未完成报名或审核未通过"))
+    }
+}
+
+fn require_admin(user: &User) -> Result<(), AppError> {
+    if user.user_group == UserGroup::Admin {
+        Ok(())
+    } else {
+        Err(AppError::forbidden("需要管理员权限"))
     }
 }
 
@@ -925,6 +962,10 @@ async fn bot_player(
         .filter(|m| m.status == MatchupStatus::Available)
         .map(|m| matchup_summary(m, &osu_id, &room_by_id))
         .collect();
+    let all_matchups: Vec<Value> = matchups
+        .iter()
+        .map(|m| matchup_summary(m, &osu_id, &room_by_id))
+        .collect();
 
     let next_schedule = schedules
         .iter()
@@ -961,6 +1002,7 @@ async fn bot_player(
             RegistrationStatus::Registered | RegistrationStatus::Approved
         ),
         "availableMatchups": available,
+        "matchups": all_matchups,
         "nextSchedule": next_schedule,
         "pendingInvitations": pending_invitations.iter().map(|m| m.to_json()).collect::<Vec<_>>(),
     })))
@@ -988,6 +1030,189 @@ async fn bot_messages(
         "count": list.len(),
         "messages": list.iter().map(|m| m.to_json()).collect::<Vec<_>>(),
     })))
+}
+
+// ============ GET /api/bot/schedules（管理员） ============
+
+#[derive(Deserialize)]
+struct BotSchedulesQuery {
+    #[serde(flatten)]
+    identity: PlatformQuery,
+    status: Option<String>,
+    limit: Option<i64>,
+}
+
+async fn bot_schedules(
+    State(state): State<AppState>,
+    _bot: BotAuth,
+    Query(q): Query<BotSchedulesQuery>,
+) -> ApiResult<Json<Value>> {
+    let user =
+        resolve_bound_user(&state, &q.identity.platform, &q.identity.platform_user_id).await?;
+    require_admin(&user)?;
+
+    let statuses = match q.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => {
+            let mut parsed = Vec::new();
+            for part in raw.split(',') {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                let status = ScheduleStatus::parse(part)
+                    .ok_or_else(|| AppError::bad_request(format!("无效的状态：{part}")))?;
+                parsed.push(status);
+            }
+            if parsed.is_empty() {
+                None
+            } else {
+                Some(parsed)
+            }
+        }
+        None => None,
+    };
+    let limit = q.limit.unwrap_or(30).clamp(1, 100);
+
+    let (schedules, rooms) = run_db(&state.pool, move |conn| {
+        let mut query = match_schedules::table.into_boxed();
+        if let Some(statuses) = statuses {
+            query = query.filter(match_schedules::status.eq_any(statuses));
+        }
+        let schedules = query
+            .order(match_schedules::created_at.desc())
+            .limit(limit)
+            .load::<MatchSchedule>(conn)
+            .map_err(AppError::from)?;
+        let rooms = match_rooms::table
+            .load::<MatchRoom>(conn)
+            .map_err(AppError::from)?;
+        Ok::<_, AppError>((schedules, rooms))
+    })
+    .await?;
+
+    let room_by_id: HashMap<i32, &MatchRoom> = rooms.iter().map(|r| (r.id, r)).collect();
+    let list: Vec<Value> = schedules
+        .iter()
+        .map(|s| {
+            let room = room_by_id.get(&s.room_id);
+            json!({
+                "id": s.id,
+                "roomId": s.room_id,
+                "roomName": room.map(|r| r.room_name.clone()).unwrap_or_default(),
+                "roundNumber": room.map(|r| r.round_number).unwrap_or(0),
+                "roundLabel": room
+                    .map(|r| round_label(r.round_number))
+                    .unwrap_or("Stage"),
+                "matchTime": room.map(|r| r.match_time.format("%Y-%m-%d %H:%M").to_string()),
+                "player1": { "osuId": s.player1_osu_id, "username": s.player1_username },
+                "player2": { "osuId": s.player2_osu_id, "username": s.player2_username },
+                "redScore": s.red_score,
+                "blueScore": s.blue_score,
+                "status": s.status.as_str(),
+            })
+        })
+        .collect();
+
+    Ok(ok(json!({
+        "count": list.len(),
+        "timezone": "UTC+8",
+        "schedules": list,
+    })))
+}
+
+// ============ POST /api/bot/scores（管理员） ============
+
+#[derive(Deserialize)]
+struct RecordScoreBody {
+    platform: String,
+    #[serde(rename = "platformUserId", alias = "platform_user_id")]
+    platform_user_id: String,
+    #[serde(rename = "scheduleId", alias = "schedule_id")]
+    schedule_id: i64,
+    #[serde(rename = "redScore", alias = "red_score")]
+    red_score: i64,
+    #[serde(rename = "blueScore", alias = "blue_score")]
+    blue_score: i64,
+    #[serde(default)]
+    status: Option<String>,
+}
+
+async fn bot_record_score(
+    State(state): State<AppState>,
+    _bot: BotAuth,
+    Json(body): Json<RecordScoreBody>,
+) -> ApiResult<Json<Value>> {
+    let user = resolve_bound_user(&state, &body.platform, &body.platform_user_id).await?;
+    require_admin(&user)?;
+
+    let schedule_id =
+        i32::try_from(body.schedule_id).map_err(|_| AppError::bad_request("无效的赛程ID"))?;
+    if !(0..=99).contains(&body.red_score) || !(0..=99).contains(&body.blue_score) {
+        return Err(AppError::bad_request("比分必须在 0-99 之间"));
+    }
+    let red_score =
+        i32::try_from(body.red_score).map_err(|_| AppError::bad_request("无效的红方比分"))?;
+    let blue_score =
+        i32::try_from(body.blue_score).map_err(|_| AppError::bad_request("无效的蓝方比分"))?;
+    let status = match body
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => {
+            ScheduleStatus::parse(raw).ok_or_else(|| AppError::bad_request("无效的赛程状态"))?
+        }
+        None => ScheduleStatus::Completed,
+    };
+
+    let now = Utc::now().naive_utc();
+    let (schedule, room) = run_db(&state.pool, move |conn| {
+        let affected = diesel::update(match_schedules::table.find(schedule_id))
+            .set((
+                match_schedules::red_score.eq(red_score),
+                match_schedules::blue_score.eq(blue_score),
+                match_schedules::status.eq(status),
+                match_schedules::updated_at.eq(now),
+            ))
+            .execute(conn)
+            .map_err(AppError::from)?;
+        if affected == 0 {
+            return Err(AppError::not_found("赛程不存在"));
+        }
+        let schedule = match_schedules::table
+            .find(schedule_id)
+            .first::<MatchSchedule>(conn)
+            .map_err(AppError::from)?;
+        let room = match_rooms::table
+            .find(schedule.room_id)
+            .first::<MatchRoom>(conn)
+            .optional()
+            .map_err(AppError::from)?;
+        Ok::<_, AppError>((schedule, room))
+    })
+    .await?;
+
+    tracing::info!(
+        "bot score recorded: admin_osu_id={} schedule_id={} score={}:{} status={}",
+        user.osu_id,
+        schedule.id,
+        schedule.red_score,
+        schedule.blue_score,
+        schedule.status.as_str()
+    );
+    Ok(ok_msg(
+        "比分已记录",
+        json!({
+            "scheduleId": schedule.id,
+            "redScore": schedule.red_score,
+            "blueScore": schedule.blue_score,
+            "status": schedule.status.as_str(),
+            "player1": { "osuId": schedule.player1_osu_id, "username": schedule.player1_username },
+            "player2": { "osuId": schedule.player2_osu_id, "username": schedule.player2_username },
+            "room": room.map(|r| r.to_json()),
+        }),
+    ))
 }
 
 // ============ POST /api/bot/book ============
@@ -1033,31 +1258,28 @@ async fn bot_book(
         }
         matchup
     } else {
-        let mut list = available_matchups(&state, &user.osu_id).await?;
-        match list.len() {
-            0 => return Err(AppError::bad_request("当前没有可预约的对战")),
-            1 => list.pop().expect("length checked"),
-            _ => {
-                let rooms = run_db(&state.pool, |conn| {
-                    match_rooms::table
-                        .load::<MatchRoom>(conn)
-                        .map_err(AppError::from)
-                })
-                .await?;
-                let room_by_id: HashMap<i32, Value> =
-                    rooms.into_iter().map(|r| (r.id, r.to_json())).collect();
-                return Ok(ok_msg(
-                    "存在多场可预约对战，请指定 matchupId",
-                    json!({
-                        "needsMatchupChoice": true,
-                        "matchups": list
-                            .iter()
-                            .map(|m| matchup_summary(m, &user.osu_id, &room_by_id))
-                            .collect::<Vec<_>>(),
-                    }),
-                ));
-            }
+        let list = available_matchups(&state, &user.osu_id).await?;
+        if list.is_empty() {
+            return Err(AppError::bad_request("当前没有可预约的对战"));
         }
+        let rooms = run_db(&state.pool, |conn| {
+            match_rooms::table
+                .load::<MatchRoom>(conn)
+                .map_err(AppError::from)
+        })
+        .await?;
+        let room_by_id: HashMap<i32, Value> =
+            rooms.into_iter().map(|r| (r.id, r.to_json())).collect();
+        return Ok(ok_msg(
+            "请先确认对战安排（红方=player1，蓝方=player2），然后带上 matchupId 再预约",
+            json!({
+                "needsMatchupChoice": true,
+                "matchups": list
+                    .iter()
+                    .map(|m| matchup_summary(m, &user.osu_id, &room_by_id))
+                    .collect::<Vec<_>>(),
+            }),
+        ));
     };
 
     let room = load_bookable_room(&state, room_id).await?;
@@ -1070,6 +1292,9 @@ async fn bot_book(
             "matchupId": matchup.id,
             "messageId": message_id,
             "opponent": { "osuId": opponent_id, "username": opponent_name },
+            "player1": { "osuId": matchup.player1_osu_id, "username": matchup.player1_username },
+            "player2": { "osuId": matchup.player2_osu_id, "username": matchup.player2_username },
+            "mySide": if matchup.player1_osu_id == user.osu_id { "red" } else { "blue" },
             "room": room_summary(&room, true, time_allows_booking(&room)),
             "timezone": "UTC+8",
         }),

@@ -77,8 +77,11 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 | `/rooms [all]` | 查看可预约房间；`all` 显示全部房间 |
 | `/bind` | 私聊获取一键绑定链接（推荐） |
 | `/bind <绑定码>` | 用网站生成的绑定码手动绑定（兼容） |
-| `/me` | 查看自己的资料、可预约对战、下一场、待确认邀请 |
-| `/book <房间ID> [对战ID]` | 预约房间；只有一场可约对战时对战 ID 可省略 |
+| `/me` | 查看资料、对战安排（红/蓝方、自己所在方）、下一场、待确认邀请 |
+| `/book <房间ID>` | 查看可预约对战安排，不会创建预约 |
+| `/book <房间ID> <对战ID>` | 确认对战 ID 后预约；红方=player1，蓝方=player2 |
+| `/score` | 管理员查看最近赛程，获取赛程 ID |
+| `/score <赛程ID> <红方比分> <蓝方比分> [状态]` | 管理员录入比分；红方=player1，蓝方=player2，状态默认 `completed` |
 | `/accept <消息ID>` | 接受对手发来的预约邀请 |
 | `/decline <消息ID>` | 拒绝预约邀请 |
 
@@ -86,14 +89,20 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 
 图池只返回 **`mappool_visible=true` 且 `approved=true`** 的图；图池未公开时不会返回任何图，只会提示“图池尚未公开”。
 
+`/score` 只允许管理员使用，写入 `match_schedules.red_score / blue_score`，并默认把状态置为 `completed`。非管理员会收到 403。
+
+预约前必须先看对战安排：`/book <房间ID>` 只返回 `player1（红） vs player2（蓝）`、`mySide` 和 `matchupId`，不会写库；确认后发送 `/book <房间ID> <对战ID>` 才会创建预约。后端会再次校验操作者是该对战的参赛者。
+
 LLM 工具（由 Agent 自动调用）：
 
 - `astracup_query_rules`
 - `astracup_get_settings`
 - `astracup_query_mappool`
 - `astracup_list_rooms`
+- `astracup_list_schedules`
 - `astracup_get_player`
 - `astracup_book_room`
+- `astracup_record_score`
 - `astracup_respond_invitation`
 
 插件的 `skills/astracup-match/SKILL.md` 会随插件一起加载到 Skill Manager，用于指导模型何时调用这些工具。

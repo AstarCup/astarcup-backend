@@ -159,6 +159,42 @@ class AstracupClient:
             params=_platform_params(platform, platform_user_id),
         )
 
+    async def schedules(
+        self,
+        platform: str,
+        platform_user_id: str,
+        status: str | None = None,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            **_platform_params(platform, platform_user_id),
+            "limit": max(1, min(int(limit or 30), 100)),
+        }
+        if status:
+            params["status"] = status
+        return await self.request("GET", "/api/bot/schedules", params=params)
+
+    async def record_score(
+        self,
+        *,
+        platform: str,
+        platform_user_id: str,
+        schedule_id: int,
+        red_score: int,
+        blue_score: int,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "platform": platform,
+            "platformUserId": platform_user_id,
+            "scheduleId": schedule_id,
+            "redScore": red_score,
+            "blueScore": blue_score,
+        }
+        if status:
+            body["status"] = status
+        return await self.request("POST", "/api/bot/scores", json_body=body)
+
     async def bind(
         self,
         *,
@@ -319,8 +355,10 @@ class AstracupPlugin(Star):
             GetSettingsTool(client=self.client),
             QueryMappoolTool(client=self.client),
             ListRoomsTool(client=self.client),
+            ListSchedulesTool(client=self.client),
             GetPlayerTool(client=self.client),
             BookRoomTool(client=self.client),
+            RecordScoreTool(client=self.client),
             RespondInvitationTool(client=self.client),
         )
 
@@ -577,21 +615,43 @@ class AstracupPlugin(Star):
             f'{data.get("username")}（osu! ID {data.get("osuId")}）',
             f'报名状态：{STATUS_LABELS.get(str(data.get("registrationStatus")), data.get("registrationStatus"))}',
         ]
-        matchups = data.get("availableMatchups") or []
+        matchups = data.get("matchups") or []
         if matchups:
-            lines.append("可预约对战：")
+            lines.append("对战安排（红方=player1，蓝方=player2）：")
             for matchup in matchups:
-                opponent = matchup.get("opponent") or {}
-                lines.append(
-                    f'  对战 #{matchup.get("id")} vs {opponent.get("username")}'
+                player1 = matchup.get("player1") or {}
+                player2 = matchup.get("player2") or {}
+                side = matchup.get("mySide")
+                side_text = (
+                    "你是红方"
+                    if side == "red"
+                    else "你是蓝方"
+                    if side == "blue"
+                    else "非参赛者"
                 )
+                room = matchup.get("room") or {}
+                room_text = (
+                    f' | 房间 {room.get("roomName")}' if room.get("roomName") else ""
+                )
+                lines.append(
+                    f'  #{matchup.get("id")} {player1.get("username")}（红） vs '
+                    f'{player2.get("username")}（蓝） | {side_text} | '
+                    f'{matchup.get("status")}{room_text}'
+                )
+            available = data.get("availableMatchups") or []
+            if available:
+                ids = "、".join(str(m.get("id")) for m in available)
+                lines.append(f"可预约对战 ID：{ids}")
+                lines.append("预约：先 /book <房间ID> 查看安排，再 /book <房间ID> <对战ID>")
         else:
-            lines.append("可预约对战：无")
+            lines.append("对战安排：暂无（请联系管理员）")
         next_schedule = data.get("nextSchedule")
         if next_schedule:
             room = next_schedule.get("room") or {}
             lines.append(
                 f'下一场：赛程 #{next_schedule.get("id")} '
+                f'{next_schedule.get("player1Username", "?")}（红） vs '
+                f'{next_schedule.get("player2Username", "?")}（蓝） '
                 f'| {room.get("roomName", "未安排房间")} '
                 f'| {room.get("matchTime", "")}'
             )
@@ -609,7 +669,7 @@ class AstracupPlugin(Star):
     async def book_command(
         self, event: AstrMessageEvent, room_id: int, matchup_id: int = 0
     ):
-        """预约房间：/book <房间ID> [对战ID]"""
+        """预约房间：/book <房间ID> 查看对战安排；/book <房间ID> <对战ID> 确认预约"""
         platform, platform_user_id = _platform_identity(event)
         if not platform_user_id:
             yield event.plain_result("无法获取你的平台账号 ID。")
@@ -621,6 +681,66 @@ class AstracupPlugin(Star):
             matchup_id=matchup_id or None,
         )
         yield event.plain_result(self._format_booking(result))
+
+    @filter.command("score", alias={"比分"})
+    async def score_command(
+        self,
+        event: AstrMessageEvent,
+        schedule_id: int = 0,
+        red_score: int = -1,
+        blue_score: int = -1,
+        status: str = "",
+    ):
+        """管理员录入比分：/score [赛程ID 红方 蓝方 [状态]]"""
+        platform, platform_user_id = _platform_identity(event)
+        if not platform_user_id:
+            yield event.plain_result("无法获取你的平台账号 ID。")
+            return
+
+        schedule_id = int(schedule_id or 0)
+        red = -1 if red_score is None else int(red_score)
+        blue = -1 if blue_score is None else int(blue_score)
+
+        # 不带参数：列出最近赛程，方便管理员拿赛程 ID
+        if schedule_id <= 0:
+            result = await self.client.schedules(
+                platform, platform_user_id, limit=20
+            )
+            if not result.get("ok"):
+                yield event.plain_result(f'查询失败：{result.get("error")}')
+                return
+            yield event.plain_result(
+                self._format_schedule_list(result.get("data") or {})
+            )
+            return
+
+        if red < 0 or blue < 0:
+            yield event.plain_result(
+                "用法：/score <赛程ID> <红方比分> <蓝方比分> [状态]"
+            )
+            return
+
+        result = await self.client.record_score(
+            platform=platform,
+            platform_user_id=platform_user_id,
+            schedule_id=schedule_id,
+            red_score=red,
+            blue_score=blue,
+            status=(status or "").strip() or None,
+        )
+        if not result.get("ok"):
+            yield event.plain_result(f'记录失败：{result.get("error")}')
+            return
+        data = result.get("data") or {}
+        player1 = data.get("player1") or {}
+        player2 = data.get("player2") or {}
+        yield event.plain_result(
+            f'已记录 #{data.get("scheduleId")}：'
+            f'{player1.get("username")}（红） {data.get("redScore")} : '
+            f'{data.get("blueScore")} {player2.get("username")}（蓝），'
+            f'状态 {data.get("status")}。\n'
+            "如果填反了，用同一命令重新提交即可覆盖。"
+        )
 
     @filter.command("accept")
     async def accept_command(self, event: AstrMessageEvent, message_id: int):
@@ -655,25 +775,61 @@ class AstracupPlugin(Star):
     # ============ 文本格式化 ============
 
     @staticmethod
+    def _format_schedule_list(data: dict[str, Any]) -> str:
+        schedules = data.get("schedules") or []
+        if not schedules:
+            return "暂无赛程。"
+        lines = ["最近赛程（管理员录入比分）："]
+        for s in schedules[:20]:
+            player1 = s.get("player1") or {}
+            player2 = s.get("player2") or {}
+            lines.append(
+                f'#{s.get("id")} {s.get("roundLabel")} {s.get("roomName")} | '
+                f'{player1.get("username")}（红） {s.get("redScore")} : '
+                f'{s.get("blueScore")} {player2.get("username")}（蓝） | '
+                f'{s.get("status")} | {s.get("matchTime")}'
+            )
+        lines.append("用法：/score <赛程ID> <红方比分> <蓝方比分> [状态]")
+        lines.append("红方=player1，蓝方=player2；状态默认 completed。")
+        return "\n".join(lines)
+
+    @staticmethod
     def _format_booking(result: dict[str, Any]) -> str:
         if not result.get("ok"):
             return f'预约失败：{result.get("error")}'
         data = result.get("data") or {}
         if data.get("needsMatchupChoice"):
-            lines = ["你有多个可预约对战，请指定对战 ID 后重试："]
+            lines = [
+                "请先确认对战安排，再指定 matchupId 预约（红方=player1，蓝方=player2）："
+            ]
             for matchup in data.get("matchups") or []:
-                opponent = matchup.get("opponent") or {}
+                player1 = matchup.get("player1") or {}
+                player2 = matchup.get("player2") or {}
+                side = matchup.get("mySide")
+                side_text = (
+                    "你是红方"
+                    if side == "red"
+                    else "你是蓝方"
+                    if side == "blue"
+                    else "非参赛者"
+                )
                 lines.append(
-                    f'  对战 #{matchup.get("id")} vs {opponent.get("username")}'
+                    f'  #{matchup.get("id")} {player1.get("username")}（红） vs '
+                    f'{player2.get("username")}（蓝） | {side_text} | {matchup.get("status")}'
                 )
             lines.append("用法：/book <房间ID> <对战ID>")
             return "\n".join(lines)
-        opponent = data.get("opponent") or {}
+
+        player1 = data.get("player1") or {}
+        player2 = data.get("player2") or {}
+        side = data.get("mySide")
+        side_text = "红方" if side == "red" else "蓝方" if side == "blue" else "-"
         room = data.get("room") or {}
         return (
             "预约成功，已通知对手确认。\n"
-            f'对战 #{data.get("matchupId")} vs {opponent.get("username")}\n'
-            f'房间：{room.get("roomName")}（{room.get("matchTime")}，UTC+8）\n'
+            f'对战 #{data.get("matchupId")}：{player1.get("username")}（红） vs '
+            f'{player2.get("username")}（蓝）\n'
+            f'你是{side_text}；房间：{room.get("roomName")}（{room.get("matchTime")}，UTC+8）\n'
             f'对手确认消息 ID：{data.get("messageId")}'
         )
 
@@ -809,6 +965,109 @@ class ListRoomsTool(FunctionTool):
 
 
 @dataclass
+class ListSchedulesTool(FunctionTool):
+    name: str = "astracup_list_schedules"
+    description: str = (
+        "管理员查看最近赛程及赛程 ID，用于录入比分。非管理员会返回 403。"
+        "用户说「给我录个比分」「查一下赛程 ID」时先调用它。"
+    )
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "可选，逗号分隔：pending,confirmed,completed,cancelled",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回条数，默认 20，最大 100",
+                },
+            },
+        }
+    )
+    client: AstracupClient = None  # type: ignore[assignment]
+
+    async def run(
+        self,
+        event: AstrMessageEvent,
+        status: str = "",
+        limit: int = 20,
+    ) -> str:
+        platform, platform_user_id = _platform_identity(event)
+        if not platform_user_id:
+            return _dump({"ok": False, "error": "无法获取发送者的平台账号 ID"})
+        try:
+            limit = int(limit or 20)
+        except (TypeError, ValueError):
+            limit = 20
+        return _dump(
+            await self.client.schedules(
+                platform,
+                platform_user_id,
+                (status or "").strip() or None,
+                limit,
+            )
+        )
+
+
+@dataclass
+class RecordScoreTool(FunctionTool):
+    name: str = "astracup_record_score"
+    description: str = (
+        "管理员记录比赛比分，写入后端 match_schedules。调用前必须确认赛程 ID 和双方比分；"
+        "非管理员会返回 403。红方=player1，蓝方=player2。"
+    )
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "schedule_id": {
+                    "type": "integer",
+                    "description": "赛程 ID",
+                },
+                "red_score": {
+                    "type": "integer",
+                    "description": "红方（player1）比分，0-99",
+                },
+                "blue_score": {
+                    "type": "integer",
+                    "description": "蓝方（player2）比分，0-99",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "可选状态：pending/confirmed/completed/cancelled，默认 completed",
+                },
+            },
+            "required": ["schedule_id", "red_score", "blue_score"],
+        }
+    )
+    client: AstracupClient = None  # type: ignore[assignment]
+
+    async def run(
+        self,
+        event: AstrMessageEvent,
+        schedule_id: int,
+        red_score: int,
+        blue_score: int,
+        status: str = "",
+    ) -> str:
+        platform, platform_user_id = _platform_identity(event)
+        if not platform_user_id:
+            return _dump({"ok": False, "error": "无法获取发送者的平台账号 ID"})
+        return _dump(
+            await self.client.record_score(
+                platform=platform,
+                platform_user_id=platform_user_id,
+                schedule_id=int(schedule_id),
+                red_score=int(red_score),
+                blue_score=int(blue_score),
+                status=(status or "").strip() or None,
+            )
+        )
+
+
+@dataclass
 class GetPlayerTool(FunctionTool):
     name: str = "astracup_get_player"
     description: str = (
@@ -831,8 +1090,9 @@ class GetPlayerTool(FunctionTool):
 class BookRoomTool(FunctionTool):
     name: str = "astracup_book_room"
     description: str = (
-        "以当前消息发送者绑定的 AstarCup 身份预约房间。必须先确认房间 ID 和用户意图；"
-        "若返回 needsMatchupChoice，需要让用户选择对战 ID 后再次调用。"
+        "以当前消息发送者绑定的 AstarCup 身份预约房间。必须先调用 astracup_get_player "
+        "查看对战安排，确认 matchup_id、红蓝方（红=player1，蓝=player2）和参赛者身份后再预约。"
+        "没有 matchup_id 时不要调用本工具。"
     )
     parameters: dict = field(
         default_factory=lambda: {
@@ -844,10 +1104,10 @@ class BookRoomTool(FunctionTool):
                 },
                 "matchup_id": {
                     "type": "integer",
-                    "description": "对战 ID；用户只有一场可预约对战时可省略",
+                    "description": "对战 ID，必填；来自 astracup_get_player 的 matchups/availableMatchups",
                 },
             },
-            "required": ["room_id"],
+            "required": ["room_id", "matchup_id"],
         }
     )
     client: AstracupClient = None  # type: ignore[assignment]
@@ -856,8 +1116,15 @@ class BookRoomTool(FunctionTool):
         self,
         event: AstrMessageEvent,
         room_id: int,
-        matchup_id: int = 0,
+        matchup_id: int,
     ) -> str:
+        if not matchup_id:
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "缺少 matchup_id；请先查看对战安排并确认对战 ID",
+                }
+            )
         platform, platform_user_id = _platform_identity(event)
         if not platform_user_id:
             return _dump({"ok": False, "error": "无法获取发送者的平台账号 ID"})
@@ -866,7 +1133,7 @@ class BookRoomTool(FunctionTool):
                 platform=platform,
                 platform_user_id=platform_user_id,
                 room_id=room_id,
-                matchup_id=matchup_id or None,
+                matchup_id=matchup_id,
             )
         )
 
