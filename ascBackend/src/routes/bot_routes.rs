@@ -322,8 +322,10 @@ fn strip_front_matter(text: &str) -> String {
 }
 
 /// 防止 season 参数被用于路径穿越
-fn valid_season_id(season: &str) -> bool {
+pub(crate) fn valid_season_id(season: &str) -> bool {
     !season.is_empty()
+        && !season.eq_ignore_ascii_case("all")
+        && season != "全部"
         && season.len() <= 32
         && season
             .chars()
@@ -535,12 +537,14 @@ async fn bot_rules(
 
     let current_season = settings
         .get("current_season")
-        .map(|s| setting_str(s))
+        .map(|s| setting_str(s).trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "s1".to_string());
     let season = q
         .season
         .as_deref()
         .map(setting_str)
+        .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty())
         .unwrap_or(current_season);
 
@@ -631,7 +635,8 @@ async fn bot_settings(State(state): State<AppState>, _bot: BotAuth) -> ApiResult
     let settings = load_settings_map(&state).await?;
     let current_season = settings
         .get("current_season")
-        .map(|s| setting_str(s))
+        .map(|s| setting_str(s).trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "s1".to_string());
     let season_name = settings
         .get("seasons")
@@ -700,7 +705,8 @@ async fn bot_mappool(
     let settings = load_settings_map(&state).await?;
     let current_season = settings
         .get("current_season")
-        .map(|s| setting_str(s))
+        .map(|s| setting_str(s).trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "s1".to_string());
     let stage = settings
         .get("current_season_stage")
@@ -714,6 +720,7 @@ async fn bot_mappool(
         .season
         .as_deref()
         .map(setting_str)
+        .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| current_season.clone());
     if !valid_season_id(&season) {
@@ -1039,6 +1046,7 @@ struct BotSchedulesQuery {
     #[serde(flatten)]
     identity: PlatformQuery,
     status: Option<String>,
+    season: Option<String>,
     limit: Option<i64>,
 }
 
@@ -1072,11 +1080,25 @@ async fn bot_schedules(
         None => None,
     };
     let limit = q.limit.unwrap_or(30).clamp(1, 100);
+    let season = q
+        .season
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("all"))
+        .map(|s| s.to_ascii_lowercase());
+    if let Some(season) = &season {
+        if !valid_season_id(season) {
+            return Err(AppError::bad_request("无效的赛季 ID"));
+        }
+    }
 
     let (schedules, rooms) = run_db(&state.pool, move |conn| {
         let mut query = match_schedules::table.into_boxed();
         if let Some(statuses) = statuses {
             query = query.filter(match_schedules::status.eq_any(statuses));
+        }
+        if let Some(season) = season {
+            query = query.filter(match_schedules::season.eq(season));
         }
         let schedules = query
             .order(match_schedules::created_at.desc())
@@ -1097,6 +1119,7 @@ async fn bot_schedules(
             let room = room_by_id.get(&s.room_id);
             json!({
                 "id": s.id,
+                "season": s.season,
                 "roomId": s.room_id,
                 "roomName": room.map(|r| r.room_name.clone()).unwrap_or_default(),
                 "roundNumber": room.map(|r| r.round_number).unwrap_or(0),
@@ -1134,6 +1157,8 @@ struct RecordScoreBody {
     #[serde(rename = "blueScore", alias = "blue_score")]
     blue_score: i64,
     #[serde(default)]
+    season: Option<String>,
+    #[serde(default)]
     status: Option<String>,
 }
 
@@ -1165,11 +1190,23 @@ async fn bot_record_score(
         }
         None => ScheduleStatus::Completed,
     };
+    let season = body
+        .season
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase());
+    if let Some(season) = &season {
+        if !valid_season_id(season) {
+            return Err(AppError::bad_request("无效的赛季 ID"));
+        }
+    }
 
     let now = Utc::now().naive_utc();
     let (schedule, room) = run_db(&state.pool, move |conn| {
         let affected = diesel::update(match_schedules::table.find(schedule_id))
             .set((
+                season.map(|v| match_schedules::season.eq(v)),
                 match_schedules::red_score.eq(red_score),
                 match_schedules::blue_score.eq(blue_score),
                 match_schedules::status.eq(status),
@@ -1205,6 +1242,7 @@ async fn bot_record_score(
         "比分已记录",
         json!({
             "scheduleId": schedule.id,
+            "season": schedule.season,
             "redScore": schedule.red_score,
             "blueScore": schedule.blue_score,
             "status": schedule.status.as_str(),

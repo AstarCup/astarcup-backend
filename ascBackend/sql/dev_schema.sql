@@ -72,6 +72,7 @@ CREATE TABLE "MatchSchedule" (
     "player1_username" TEXT NOT NULL,
     "player2_osuId" TEXT NOT NULL,
     "player2_username" TEXT NOT NULL,
+    "season" TEXT,
     "red_score" INTEGER NOT NULL DEFAULT 0,
     "blue_score" INTEGER NOT NULL DEFAULT 0,
     "status" "ScheduleStatus" NOT NULL DEFAULT 'pending',
@@ -86,6 +87,7 @@ CREATE INDEX "MatchSchedule_room_id_idx" ON "MatchSchedule"("room_id");
 CREATE INDEX "MatchSchedule_player1_osuId_idx" ON "MatchSchedule"("player1_osuId");
 CREATE INDEX "MatchSchedule_player2_osuId_idx" ON "MatchSchedule"("player2_osuId");
 CREATE INDEX "MatchSchedule_status_idx" ON "MatchSchedule"("status");
+CREATE INDEX "MatchSchedule_season_idx" ON "MatchSchedule"("season");
 CREATE INDEX "MatchSchedule_created_by_idx" ON "MatchSchedule"("created_by");
 
 -- ============ PlayerMatchup ============

@@ -16,7 +16,7 @@ use crate::enums::{MatchupStatus, MessageStatus, MessageType, RoomStatus, Schedu
 use crate::error::{ApiResult, AppError, ok, ok_msg};
 use crate::models::{MatchRoom, MatchSchedule, PlayerMatchup};
 use crate::routes::users_routes::permissions_json;
-use crate::schema::{match_rooms, match_schedules, messages, player_matchups};
+use crate::schema::{match_rooms, match_schedules, messages, player_matchups, tournament_settings};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -88,6 +88,7 @@ async fn create_schedule(
 ) -> ApiResult<Json<Value>> {
     let permissions = permissions_json(&state, &user.osu_id).await?;
     let is_admin = permissions["isadmin"].as_bool().unwrap_or(false);
+    let season = current_season(&state).await?;
 
     // 模式 1：管理员创建（不需要对战 ID）
     if body.is_admin_create {
@@ -112,8 +113,17 @@ async fn create_schedule(
         let room_id = i32::try_from(room_id).map_err(|_| AppError::bad_request("无效的房间ID"))?;
         let room = load_room(&state, room_id).await?;
         ensure_not_within_2h(&room)?;
-        let schedule =
-            insert_schedule(&state, room_id, p1, p1u, p2, p2u, user.osu_id.clone()).await?;
+        let schedule = insert_schedule(
+            &state,
+            room_id,
+            p1,
+            p1u,
+            p2,
+            p2u,
+            season.clone(),
+            user.osu_id.clone(),
+        )
+        .await?;
         return Ok(ok_msg(
             "比赛预约创建成功（管理员模式）",
             schedule.to_json(None),
@@ -174,6 +184,7 @@ async fn create_schedule(
         matchup.player1_username.clone(),
         matchup.player2_osu_id.clone(),
         matchup.player2_username.clone(),
+        season,
         user.osu_id.clone(),
     )
     .await?;
@@ -316,6 +327,30 @@ pub(crate) async fn notify_booking(
     Ok((message_id, opponent_id, opponent_name))
 }
 
+/// 读取当前赛季（tournament_settings.current_season），默认 s1。
+pub(crate) async fn current_season(state: &AppState) -> Result<String, AppError> {
+    let raw = run_db(&state.pool, |conn| {
+        tournament_settings::table
+            .filter(tournament_settings::setting_key.eq("current_season"))
+            .select(tournament_settings::setting_value)
+            .first::<String>(conn)
+            .optional()
+            .map_err(AppError::from)
+    })
+    .await?;
+    let season = raw
+        .map(|v| {
+            serde_json::from_str::<Value>(&v)
+                .ok()
+                .and_then(|x| x.as_str().map(str::to_string))
+                .unwrap_or(v)
+        })
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "s1".to_string());
+    Ok(season)
+}
+
 async fn insert_schedule(
     state: &AppState,
     room_id: i32,
@@ -323,6 +358,7 @@ async fn insert_schedule(
     p1u: String,
     p2: String,
     p2u: String,
+    season: String,
     created_by: String,
 ) -> Result<MatchSchedule, AppError> {
     run_db(&state.pool, move |conn| {
@@ -334,6 +370,7 @@ async fn insert_schedule(
                 match_schedules::player1_username.eq(&p1u),
                 match_schedules::player2_osu_id.eq(&p2),
                 match_schedules::player2_username.eq(&p2u),
+                match_schedules::season.eq(&season),
                 match_schedules::red_score.eq(0),
                 match_schedules::blue_score.eq(0),
                 match_schedules::status.eq(ScheduleStatus::Pending),
@@ -433,6 +470,8 @@ async fn update_schedule_status(
 
 #[derive(serde::Deserialize)]
 struct UpdateDetailsBody {
+    #[serde(rename = "season", default)]
+    season: Option<String>,
     #[serde(rename = "redScore", alias = "red_score", default)]
     red_score: Option<i32>,
     #[serde(rename = "blueScore", alias = "blue_score", default)]
@@ -459,9 +498,21 @@ async fn update_schedule_details(
         }
         None => None,
     };
+    let season = body
+        .season
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase());
+    if let Some(season) = &season {
+        if !crate::routes::bot_routes::valid_season_id(season) {
+            return Err(AppError::bad_request("无效的赛季 ID"));
+        }
+    }
     let n = run_db(&state.pool, move |conn| {
         diesel::update(match_schedules::table.find(id))
             .set((
+                season.map(|v| match_schedules::season.eq(v)),
                 body.red_score.map(|v| match_schedules::red_score.eq(v)),
                 body.blue_score.map(|v| match_schedules::blue_score.eq(v)),
                 body.match_link

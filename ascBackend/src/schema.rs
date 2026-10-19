@@ -84,6 +84,7 @@ table! {
         player2_osu_id -> Varchar,
         #[sql_name = "player2_username"]
         player2_username -> Varchar,
+        season -> Nullable<Varchar>,
         red_score -> Int4,
         blue_score -> Int4,
         status -> crate::enums::ScheduleStatusType,
