@@ -1,8 +1,8 @@
 name: astrbot_plugin_astracup
 display_name: AstarCup 比赛助手
-desc: 查询 AstarCup 比赛规则与房间，为已报名选手预约比赛房间并处理预约确认。
-short_desc: AstarCup 规则查询与比赛预约
-version: 0.2.0
+desc: 查询 AstarCup 比赛规则、全局设置与公开图池，为已报名选手预约比赛房间并处理预约确认。
+short_desc: AstarCup 规则/图池查询与比赛预约
+version: 0.3.0
 author: AstarCup
 repo: https://github.com/AstarCup/astarcup-backend
 support_platforms:

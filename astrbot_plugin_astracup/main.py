@@ -31,7 +31,13 @@ class AstracupClient:
     """astarcup 后端 Bot API 的轻量异步客户端。"""
 
     def __init__(self, base_url: str, token: str, timeout: int = 10):
-        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        raw_base = str(base_url or DEFAULT_BASE_URL).strip().rstrip("/")
+        # 兼容把 /api 或 /api/bot 也填进来的配置；客户端会自己拼接 /api/bot/*
+        for suffix in ("/api/bot", "/api"):
+            if raw_base.endswith(suffix):
+                raw_base = raw_base[: -len(suffix)].rstrip("/")
+                break
+        self.base_url = raw_base or DEFAULT_BASE_URL.rstrip("/")
         self.token = (token or "").strip()
         self.timeout = max(1, int(timeout or 10))
         self._session: aiohttp.ClientSession | None = None
@@ -112,6 +118,19 @@ class AstracupClient:
         if round_number:
             params["round"] = round_number
         return await self.request("GET", "/api/bot/rooms", params=params or None)
+
+    async def mappool(
+        self, season: str | None = None, category: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if season:
+            params["season"] = season
+        if category:
+            params["category"] = category
+        return await self.request("GET", "/api/bot/mappool", params=params or None)
+
+    async def settings(self) -> dict[str, Any]:
+        return await self.request("GET", "/api/bot/settings")
 
     async def whoami(
         self, platform: str, platform_user_id: str
@@ -268,6 +287,14 @@ def _room_line(room: dict[str, Any]) -> str:
     )
 
 
+def _fmt_length(seconds: Any) -> str:
+    try:
+        total = int(seconds)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{total // 60}:{total % 60:02d}"
+
+
 def _bind_hint() -> str:
     return (
         "你还没有绑定 astarcup 账号。\n"
@@ -289,6 +316,8 @@ class AstracupPlugin(Star):
         )
         self.context.add_llm_tools(
             QueryRulesTool(client=self.client),
+            GetSettingsTool(client=self.client),
+            QueryMappoolTool(client=self.client),
             ListRoomsTool(client=self.client),
             GetPlayerTool(client=self.client),
             BookRoomTool(client=self.client),
@@ -356,6 +385,116 @@ class AstracupPlugin(Star):
         if len(rooms) > 20:
             lines.append(f"……仅显示前 20 个，共 {len(rooms)} 个")
         lines.append("预约：/book <房间ID> [对战ID]")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("mappool", alias={"pool", "图池"})
+    async def mappool_command(
+        self, event: AstrMessageEvent, season: str = "", category: str = ""
+    ):
+        """查看公开图池：/mappool [赛季] [阶段]（阶段：QUA/RO16/QF/SF/F/GF）"""
+        season = (season or "").strip()
+        category = (category or "").strip()
+        # 允许 /mappool QF 这种只写阶段的用法
+        category_words = {
+            "all",
+            "qua",
+            "qualification",
+            "ro32",
+            "ro16",
+            "qf",
+            "quarterfinals",
+            "sf",
+            "semifinals",
+            "f",
+            "finals",
+            "gf",
+            "grandfinals",
+            "全部",
+            "资格赛",
+            "三十二强",
+            "十六强",
+            "八强",
+            "四分之一决赛",
+            "半决赛",
+            "决赛",
+            "总决赛",
+        }
+        if season.lower() in category_words and not category:
+            season, category = "", season
+        result = await self.client.mappool(season or None, category or None)
+        if not result.get("ok"):
+            yield event.plain_result(f'查询失败：{result.get("error")}')
+            return
+        data = result.get("data") or {}
+        if not data.get("visible"):
+            yield event.plain_result(data.get("message") or "图池尚未公开。")
+            return
+
+        maps = data.get("maps") or []
+        header = (
+            f'{data.get("tournamentName") or "AstarCup"} '
+            f'{str(data.get("season") or "").upper()} · '
+            f'{data.get("categoryLabel") or "全部"} 图池（{data.get("count", len(maps))} 张）'
+        )
+        if not maps:
+            yield event.plain_result(header + "\n该阶段暂无公开图池。")
+            return
+
+        lines = [header]
+        for group in data.get("groups") or []:
+            lines.append(f'[{group.get("label")}]')
+            for mod_group in group.get("mods") or []:
+                lines.append(f'  {mod_group.get("mod")}:')
+                for m in mod_group.get("maps") or []:
+                    star = m.get("starRating")
+                    star_text = f"{star:g}" if isinstance(star, (int, float)) else "-"
+                    lines.append(
+                        f'    {m.get("position", 0)}. {m.get("artist")} - {m.get("title")} '
+                        f'[{m.get("version")}] ★{star_text} '
+                        f'· {_fmt_length(m.get("lengthSeconds"))}'
+                    )
+        text = "\n".join(lines)
+        if len(text) > 1800:
+            text = text[:1800] + "\n……（图池较长，完整内容见网站）"
+        site = data.get("site") or {}
+        if site.get("mappool"):
+            text += f'\n完整图池：{site["mappool"]}'
+        yield event.plain_result(text)
+
+    @filter.command("settings", alias={"设置"})
+    async def settings_command(self, event: AstrMessageEvent):
+        """查看全局比赛设置：/settings"""
+        result = await self.client.settings()
+        if not result.get("ok"):
+            yield event.plain_result(f'查询失败：{result.get("error")}')
+            return
+        data = result.get("data") or {}
+        registration = data.get("registration") or {}
+        pp_range = registration.get("ppRange") or {}
+        season = str(data.get("currentSeason") or "").upper()
+        season_name = data.get("currentSeasonName")
+
+        lines = [
+            f'{data.get("tournamentName") or "AstarCup"}',
+            f'当前赛季：{season}' + (f'（{season_name}）' if season_name else ""),
+            f'当前阶段：{data.get("currentStageLabel") or data.get("currentStage") or "-"}',
+            "报名："
+            + ("开放" if registration.get("enabled") else "未开放")
+            + f'，PP {pp_range.get("min", 0):g} - {pp_range.get("max", 0):g}',
+            "公开图池：" + ("已公开" if data.get("mappoolVisible") else "未公开"),
+        ]
+        seasons = data.get("seasons") or []
+        if seasons:
+            lines.append(
+                "赛季："
+                + "、".join(
+                    f'{s.get("name") or s.get("id")}（{s.get("status") or "-"}）'
+                    for s in seasons
+                )
+            )
+        site = data.get("site") or {}
+        if site.get("guide"):
+            lines.append(f'比赛手册：{site["guide"]}')
         yield event.plain_result("\n".join(lines))
 
     @filter.command("bind")
@@ -574,7 +713,61 @@ class QueryRulesTool(FunctionTool):
     client: AstracupClient = None  # type: ignore[assignment]
 
     async def run(self, event: AstrMessageEvent, season: str = "") -> str:
-        return _dump(await self.client.rules(season.strip() or None))
+        return _dump(await self.client.rules((season or "").strip() or None))
+
+
+@dataclass
+class GetSettingsTool(FunctionTool):
+    name: str = "astracup_get_settings"
+    description: str = (
+        "查询 AstarCup 全局比赛设置：当前赛季/阶段、报名开关、PP 区间、图池是否公开、赛季列表。"
+        "用户问「现在什么阶段」「报名条件」「图池公开了吗」时调用。"
+    )
+    parameters: dict = field(
+        default_factory=lambda: {"type": "object", "properties": {}}
+    )
+    client: AstracupClient = None  # type: ignore[assignment]
+
+    async def run(self, event: AstrMessageEvent) -> str:
+        return _dump(await self.client.settings())
+
+
+@dataclass
+class QueryMappoolTool(FunctionTool):
+    name: str = "astracup_query_mappool"
+    description: str = (
+        "查询 AstarCup 公开图池（只包含已公开且已过审的图）。"
+        "用户问「图池是什么」「QF 有哪些图」「某赛季图池」时调用。"
+    )
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "season": {
+                    "type": "string",
+                    "description": "赛季 ID，例如 s2；留空表示当前赛季",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "阶段：all/QUA/RO16/QF/SF/F/GF；留空表示当前阶段",
+                },
+            },
+        }
+    )
+    client: AstracupClient = None  # type: ignore[assignment]
+
+    async def run(
+        self,
+        event: AstrMessageEvent,
+        season: str = "",
+        category: str = "",
+    ) -> str:
+        return _dump(
+            await self.client.mappool(
+                (season or "").strip() or None,
+                (category or "").strip() or None,
+            )
+        )
 
 
 @dataclass
