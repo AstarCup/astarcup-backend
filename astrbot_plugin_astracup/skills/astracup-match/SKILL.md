@@ -1,6 +1,6 @@
 ---
 name: astracup-match
-description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、查看比赛房间，或需要预约房间、接受或拒绝预约邀请时使用。选手身份来自「平台账号绑定」，不是 QQ 号；未绑定时引导用户去网站生成一次性绑定码，不要在对话里索要或代填 osu! ID。
+description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、全局比赛设置、公开图池、比赛房间，或需要预约房间、接受或拒绝预约邀请时使用。选手身份来自「平台账号绑定」，不是 QQ 号；未绑定时引导用户私聊发送 /bind 获取一次性绑定链接，不要在对话里索要或代填 osu! ID。
 ---
 
 # AstarCup 比赛助手
@@ -35,6 +35,8 @@ description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、查看�
 | 工具 | 用途 | 主要参数 |
 | --- | --- | --- |
 | `astracup_query_rules` | 查询规则、赛制、报名条件和赛季信息 | `season`（可选） |
+| `astracup_get_settings` | 查询全局比赛设置：当前赛季/阶段、报名、PP 区间、图池公开状态 | 无 |
+| `astracup_query_mappool` | 查询公开图池（已公开且已过审） | `season`、`category` |
 | `astracup_list_rooms` | 查看房间、时间、占用与可预约状态 | `include_all`、`round_number` |
 | `astracup_get_player` | 查询当前绑定选手的资料、可预约对战、下一场、待确认邀请 | 无 |
 | `astracup_book_room` | 以当前绑定身份预约房间 | `room_id`，必要时 `matchup_id` |
@@ -49,14 +51,31 @@ description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、查看�
 3. 如果 `rulesMarkdown` 为空，明确说明「当前赛季规则文本尚未配置」，并给出 `data.site.guide` 链接。
 4. 可补充 `data.registration`（报名是否开放、PP 区间）和 `data.bookingPolicy`。
 
-### 2. 查看房间
+### 2. 图池查询
+
+1. 调用 `astracup_query_mappool`；用户指定赛季时传 `season`（如 `s2`），指定阶段时传 `category`。
+   `category` 可用：`all`、`QUA`、`RO16`、`QF`、`SF`、`F`、`GF`；留空表示当前阶段。
+2. 如果 `data.visible` 为 `false`，明确说“图池尚未公开”，不要猜测或列出任何图。
+3. 只展示工具返回的 `groups`。这些已经是公开（`mappool_visible=true`）且过审（`approved=true`）的图；
+   不要补充没有返回的图，也不要说“还有未公开的图”。
+4. 按 `groups`（阶段 → mod → maps）展示，保留序号、Artist - Title [Diff]、星数；`count` 为 0 时说明该赛季/阶段暂无公开图池。
+5. 如果用户问的是具体图，只引用返回数据中的 `title`、`artist`、`version`、`starRating`、`bpm`、`lengthSeconds`。
+
+### 3. 全局设置
+
+1. 调用 `astracup_get_settings`。
+2. 回答当前赛季/阶段、报名是否开放、PP 区间、图池是否公开、赛季列表。
+3. 设置回答“现在是什么状态”，规则回答“赛制/条款是什么”。用户问规则条款时再调用 `astracup_query_rules`。
+4. 不要根据设置自行推断未提供的规则，例如具体 ban/pick 流程。
+
+### 4. 查看房间
 
 1. 调用 `astracup_list_rooms`。默认只返回 `open` 房间；用户想看全部时传 `include_all: true`。
 2. 只把 `available: true` 的房间称为「可预约」。
 3. `claimed: true` 表示已被赛程或待确认对战占用；`available: false` 也可能因为距开赛不足 2 小时。
 4. 展示时保留房间 ID、房间名、轮次、`matchTime`，并说明时间为 UTC+8。
 
-### 3. 预约前确认
+### 5. 预约前确认
 
 1. 先调用 `astracup_get_player`，确认：
    - 返回成功（未绑定会返回 403，见上文引导）；
@@ -68,7 +87,7 @@ description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、查看�
 5. **必须在用户明确说出要预约的房间 ID 后才调用 `astracup_book_room`**。
    不要根据用户一句「随便约一个」自动选房。
 
-### 4. 执行预约
+### 6. 执行预约
 
 调用：
 
@@ -90,7 +109,7 @@ description: 当用户询问 AstarCup 比赛规则/赛制/报名条件、查看�
 - 成功：告知 `matchupId`、对手、房间名与时间，以及「已通知对手确认」。
   预约此时是 `pending`，对手接受后才生成赛程。
 
-### 5. 处理预约邀请
+### 7. 处理预约邀请
 
 1. 用户说「看看我的预约」「有什么要确认的」时调用 `astracup_get_player`，读取 `pendingInvitations`。
 2. 展示消息 ID、发起人和内容。

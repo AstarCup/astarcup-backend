@@ -5,6 +5,8 @@
 // 绑定码由网站登录用户生成，机器人私聊兑换；不使用 users.qq 做鉴权。
 //
 //   GET  /api/bot/rules?season=                     比赛规则与赛事信息
+//   GET  /api/bot/settings                          全局比赛设置
+//   GET  /api/bot/mappool?season=&category=         公开图池（visible + approved）
 //   GET  /api/bot/rooms?all=&round=                 房间列表（默认只返回可预约房间）
 //   GET  /api/bot/whoami?platform=&platformUserId=  当前平台身份绑定了谁
 //   GET  /api/bot/players?platform=&platformUserId= 选手档案 / 可预约对战 / 下一场
@@ -20,7 +22,7 @@
 //   POST   /api/me/bot-bind-link/confirm     确认绑定（消耗链接）
 //   GET    /api/me/bot-bindings              查看已绑定平台身份
 //   DELETE /api/me/bot-bindings/{id}         解绑
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::StatusCode;
@@ -42,14 +44,14 @@ use crate::enums::{
 };
 use crate::error::{ApiResult, AppError, ok, ok_msg};
 use crate::models::{
-    BotBindCode, BotBindLink, BotPlatformBinding, MatchRoom, MatchSchedule, Message, PlayerMatchup,
-    User,
+    BotBindCode, BotBindLink, BotPlatformBinding, MapSelection, MatchRoom, MatchSchedule, Message,
+    PlayerMatchup, User,
 };
 use crate::routes::messages_routes::{apply_message_action, load_message};
 use crate::routes::schedules_routes::{claimed_room_ids, load_bookable_room, notify_booking};
 use crate::schema::{
-    bot_bind_codes, bot_bind_links, bot_platform_bindings, match_rooms, match_schedules, messages,
-    player_matchups, tournament_settings, users,
+    bot_bind_codes, bot_bind_links, bot_platform_bindings, map_selections, match_rooms,
+    match_schedules, messages, player_matchups, tournament_settings, users,
 };
 use crate::state::AppState;
 
@@ -58,6 +60,8 @@ const BIND_CODE_TTL_MINUTES: i64 = 10;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/bot/rules", get(bot_rules))
+        .route("/api/bot/settings", get(bot_settings))
+        .route("/api/bot/mappool", get(bot_mappool))
         .route("/api/bot/rooms", get(bot_rooms))
         .route("/api/bot/whoami", get(bot_whoami))
         .route("/api/bot/players", get(bot_player))
@@ -159,6 +163,127 @@ fn setting_number(raw: Option<&String>) -> Option<f64> {
         Ok(Value::Number(n)) => n.as_f64(),
         _ => r.trim().parse::<f64>().ok(),
     })
+}
+
+async fn load_settings_map(state: &AppState) -> Result<HashMap<String, String>, AppError> {
+    let rows = run_db(&state.pool, |conn| {
+        tournament_settings::table
+            .load::<crate::models::TournamentSetting>(conn)
+            .map_err(AppError::from)
+    })
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.setting_key, r.setting_value))
+        .collect())
+}
+
+/// 设置里的阶段短码 / 图池类别长值 -> 图池类别
+fn stage_to_category(stage: &str) -> Option<&'static str> {
+    match stage.to_ascii_lowercase().as_str() {
+        "qua" | "qualification" => Some("qualification"),
+        "ro32" => Some("ro32"),
+        "ro16" => Some("ro16"),
+        "qf" | "quarterfinals" => Some("quarterfinals"),
+        "sf" | "semifinals" => Some("semifinals"),
+        "f" | "finals" => Some("finals"),
+        "gf" | "grandfinals" => Some("grandfinals"),
+        _ => None,
+    }
+}
+
+fn stage_label(stage: &str) -> String {
+    match stage.to_ascii_lowercase().as_str() {
+        "qua" | "qualification" => "QUA".to_string(),
+        "ro32" => "RO32".to_string(),
+        "ro16" => "RO16".to_string(),
+        "qf" | "quarterfinals" => "QF".to_string(),
+        "sf" | "semifinals" => "SF".to_string(),
+        "f" | "finals" => "F".to_string(),
+        "gf" | "grandfinals" => "GF".to_string(),
+        "registration" => "Registration".to_string(),
+        other => other.to_uppercase(),
+    }
+}
+
+fn category_label(category: &str) -> &'static str {
+    match category {
+        "qualification" => "QUA",
+        "ro32" => "RO32",
+        "ro16" => "RO16",
+        "quarterfinals" => "QF",
+        "semifinals" => "SF",
+        "finals" => "F",
+        "grandfinals" => "GF",
+        _ => "Stage",
+    }
+}
+
+fn category_rank(category: &str) -> usize {
+    match category {
+        "qualification" => 0,
+        "ro32" => 1,
+        "ro16" => 2,
+        "quarterfinals" => 3,
+        "semifinals" => 4,
+        "finals" => 5,
+        "grandfinals" => 6,
+        _ => 99,
+    }
+}
+
+fn mod_rank(mod_name: &str) -> usize {
+    const ORDER: &[&str] = &["NM", "HD", "HR", "DT", "FM", "LZ", "TB"];
+    ORDER.iter().position(|m| *m == mod_name).unwrap_or(99)
+}
+
+/// 图池类别输入：all/全部 表示不过滤；支持短码和长值。
+fn normalize_category(input: &str) -> Result<Option<String>, AppError> {
+    let value = input.trim().to_ascii_lowercase();
+    if value.is_empty() || value == "all" || value == "全部" {
+        return Ok(None);
+    }
+    let category = match value.as_str() {
+        "qua" | "qualification" | "资格赛" => "qualification",
+        "ro32" | "三十二强" => "ro32",
+        "ro16" | "十六强" => "ro16",
+        "qf" | "quarterfinals" | "八强" | "四分之一决赛" => "quarterfinals",
+        "sf" | "semifinals" | "半决赛" => "semifinals",
+        "f" | "finals" | "决赛" => "finals",
+        "gf" | "grandfinals" | "总决赛" => "grandfinals",
+        _ => {
+            return Err(AppError::bad_request(
+                "无效的图池阶段，可选：all/QUA/RO16/QF/SF/F/GF",
+            ));
+        }
+    };
+    Ok(Some(category.to_string()))
+}
+
+fn seasons_list(raw: Option<&String>) -> Value {
+    let mut list: Vec<Value> = raw
+        .and_then(|r| serde_json::from_str::<Value>(r).ok())
+        .and_then(|v| {
+            v.as_object().map(|obj| {
+                obj.iter()
+                    .map(|(id, v)| {
+                        json!({
+                            "id": id,
+                            "name": v.get("name").and_then(|n| n.as_str()).unwrap_or(id),
+                            "status": v.get("status").and_then(|s| s.as_str()).unwrap_or(""),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default();
+    list.sort_by(|a, b| {
+        a["id"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["id"].as_str().unwrap_or(""))
+    });
+    Value::Array(list)
 }
 
 /// 去掉 Markdown 的 YAML frontmatter，避免把元信息喂给模型
@@ -369,16 +494,7 @@ async fn bot_rules(
     _bot: BotAuth,
     Query(q): Query<RulesQuery>,
 ) -> ApiResult<Json<Value>> {
-    let rows = run_db(&state.pool, |conn| {
-        tournament_settings::table
-            .load::<crate::models::TournamentSetting>(conn)
-            .map_err(AppError::from)
-    })
-    .await?;
-    let settings: HashMap<String, String> = rows
-        .into_iter()
-        .map(|r| (r.setting_key, r.setting_value))
-        .collect();
+    let settings = load_settings_map(&state).await?;
 
     let current_season = settings
         .get("current_season")
@@ -469,6 +585,224 @@ async fn bot_rules(
             "mappool": format!("{site}/mappool"),
             "register": format!("{site}/register"),
         },
+    })))
+}
+
+// ============ GET /api/bot/settings ============
+
+async fn bot_settings(State(state): State<AppState>, _bot: BotAuth) -> ApiResult<Json<Value>> {
+    let settings = load_settings_map(&state).await?;
+    let current_season = settings
+        .get("current_season")
+        .map(|s| setting_str(s))
+        .unwrap_or_else(|| "s1".to_string());
+    let season_name = settings
+        .get("seasons")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|v| {
+            v.get(&current_season)
+                .and_then(|s| s.get("name"))
+                .and_then(|n| n.as_str())
+                .map(str::to_string)
+        });
+    let stage = settings
+        .get("current_season_stage")
+        .map(|s| setting_str(s))
+        .unwrap_or_else(|| "registration".to_string());
+    let site = state.config.frontend_url.trim_end_matches('/').to_string();
+
+    Ok(ok(json!({
+        "tournamentName": settings.get("tournament_name").map(|s| setting_str(s)).unwrap_or_default(),
+        "currentSeason": current_season,
+        "currentSeasonName": season_name,
+        "currentStage": stage,
+        "currentStageLabel": stage_label(&stage),
+        "seasons": seasons_list(settings.get("seasons")),
+        "registration": {
+            "enabled": settings
+                .get("registration_enabled")
+                .map(|r| setting_bool(Some(r)))
+                .unwrap_or(true),
+            "ppRange": {
+                "min": setting_number(settings.get("min_pp_for_registration")).unwrap_or(0.0),
+                "max": setting_number(settings.get("max_pp_for_registration")).unwrap_or(7000.0),
+            },
+        },
+        "mappoolVisible": settings
+            .get("mappool_visible")
+            .map(|r| setting_bool(Some(r)))
+            .unwrap_or(false),
+        "bookingPolicy": {
+            "timezone": "UTC+8",
+            "minHoursBeforeStart": 2,
+            "note": "距开赛不足 2 小时、房间已被安排、或对战已被预约时无法预约",
+        },
+        "site": {
+            "home": site.clone(),
+            "guide": format!("{site}/guide"),
+            "schedule": format!("{site}/schedule"),
+            "mappool": format!("{site}/mappool"),
+            "register": format!("{site}/register"),
+        },
+    })))
+}
+
+// ============ GET /api/bot/mappool ============
+
+#[derive(Deserialize)]
+struct MappoolQuery {
+    season: Option<String>,
+    category: Option<String>,
+}
+
+async fn bot_mappool(
+    State(state): State<AppState>,
+    _bot: BotAuth,
+    Query(q): Query<MappoolQuery>,
+) -> ApiResult<Json<Value>> {
+    let settings = load_settings_map(&state).await?;
+    let current_season = settings
+        .get("current_season")
+        .map(|s| setting_str(s))
+        .unwrap_or_else(|| "s1".to_string());
+    let stage = settings
+        .get("current_season_stage")
+        .map(|s| setting_str(s))
+        .unwrap_or_else(|| "registration".to_string());
+    let visible = settings
+        .get("mappool_visible")
+        .map(|r| setting_bool(Some(r)))
+        .unwrap_or(false);
+    let season = q
+        .season
+        .as_deref()
+        .map(setting_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| current_season.clone());
+    if !valid_season_id(&season) {
+        return Err(AppError::bad_request("无效的赛季 ID"));
+    }
+    let season_name = settings
+        .get("seasons")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|v| {
+            v.get(&season)
+                .and_then(|s| s.get("name"))
+                .and_then(|n| n.as_str())
+                .map(str::to_string)
+        });
+    let tournament_name = settings
+        .get("tournament_name")
+        .map(|s| setting_str(s))
+        .unwrap_or_default();
+
+    if !visible {
+        return Ok(ok(json!({
+            "visible": false,
+            "tournamentName": tournament_name,
+            "season": season,
+            "seasonName": season_name,
+            "message": "图池尚未公开",
+        })));
+    }
+
+    let category = match q.category.as_deref() {
+        Some(input) if !input.trim().is_empty() => normalize_category(input)?,
+        _ => stage_to_category(&stage).map(str::to_string),
+    };
+    let category_label_value = category.as_deref().map(category_label);
+    let season_for_db = season.clone();
+    let category_for_db = category.clone();
+
+    let rows = run_db(&state.pool, move |conn| {
+        let mut query = map_selections::table
+            .filter(map_selections::season.eq(&season_for_db))
+            .filter(map_selections::approved.eq(true))
+            .into_boxed();
+        if let Some(c) = category_for_db {
+            query = query.filter(map_selections::category.eq(c));
+        }
+        query
+            .order((
+                map_selections::category.asc(),
+                map_selections::mod_position.asc(),
+                map_selections::selected_at.asc(),
+            ))
+            .load::<MapSelection>(conn)
+            .map_err(AppError::from)
+    })
+    .await?;
+
+    let mut grouped: BTreeMap<String, BTreeMap<String, Vec<Value>>> = BTreeMap::new();
+    let mut count = 0usize;
+    for m in &rows {
+        let category_value = m.category.clone().unwrap_or_else(|| "unknown".to_string());
+        let mod_name = MapSelection::base_mod(m.selected_mods.as_deref().unwrap_or("NM"));
+        let map = json!({
+            "category": category_value,
+            "categoryLabel": category_label(&category_value),
+            "mod": mod_name,
+            "position": m.mod_position.unwrap_or(0),
+            "title": m.title,
+            "artist": m.artist,
+            "version": m.version,
+            "creator": m.creator,
+            "starRating": m.star_rating,
+            "bpm": m.bpm,
+            "lengthSeconds": m.total_length,
+            "beatmapId": m.beatmap_id,
+            "beatmapsetId": m.beatmapset_id,
+            "url": m.url,
+            "padding": m.padding,
+            "comment": m.comment.clone().unwrap_or_default(),
+        });
+        count += 1;
+        grouped
+            .entry(category_value)
+            .or_default()
+            .entry(mod_name)
+            .or_default()
+            .push(map);
+    }
+
+    let groups: Vec<Value> = {
+        let mut categories: Vec<(&String, &BTreeMap<String, Vec<Value>>)> =
+            grouped.iter().collect();
+        categories.sort_by_key(|(c, _)| category_rank(c));
+        categories
+            .into_iter()
+            .map(|(category, mods)| {
+                let mut mod_groups: Vec<(&String, &Vec<Value>)> = mods.iter().collect();
+                mod_groups.sort_by_key(|(m, _)| mod_rank(m));
+                json!({
+                    "category": category,
+                    "label": category_label(category),
+                    "mods": mod_groups
+                        .into_iter()
+                        .map(|(mod_name, maps)| json!({
+                            "mod": mod_name,
+                            "maps": maps,
+                        }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect()
+    };
+
+    let site = state.config.frontend_url.trim_end_matches('/');
+    let mappool_url = format!("{site}/mappool?season={}", crate::auth::url_encode(&season));
+
+    Ok(ok(json!({
+        "visible": true,
+        "tournamentName": tournament_name,
+        "season": season,
+        "seasonName": season_name,
+        "stage": stage,
+        "category": category,
+        "categoryLabel": category_label_value,
+        "count": count,
+        "groups": groups,
+        "site": { "mappool": mappool_url },
     })))
 }
 

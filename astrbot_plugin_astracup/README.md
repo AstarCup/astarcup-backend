@@ -28,7 +28,7 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 
 把本目录整体放到 AstrBot 的 `data/plugins/astrbot_plugin_astracup/`，在 WebUI 重载插件，然后填写插件配置：
 
-- `base_url`：后端地址，例如 `https://api.example.com`
+- `base_url`：站点根地址，例如 `https://www.rino.ink`。插件会自动拼接 `/api/bot/*`，**不要**填成 `/api/bot/rules` 这类完整接口；填 `https://www.rino.ink/api` 也可以，插件会自动去掉末尾的 `/api`。
 - `bot_token`：与后端 `BOT_TOKEN` 一致
 
 生产环境请使用 HTTPS：`bot_token` 和绑定码都会随请求传输。
@@ -72,6 +72,8 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 | 指令 | 说明 |
 | --- | --- |
 | `/rules [赛季]` | 查询比赛规则与赛季信息 |
+| `/settings` | 查看全局比赛设置：赛季、阶段、报名、PP 区间、图池是否公开 |
+| `/mappool [赛季] [阶段]` | 查看公开图池；阶段可用 `QUA/RO16/QF/SF/F/GF/all`，`/mappool QF` 也会按当前赛季查询 |
 | `/rooms [all]` | 查看可预约房间；`all` 显示全部房间 |
 | `/bind` | 私聊获取一键绑定链接（推荐） |
 | `/bind <绑定码>` | 用网站生成的绑定码手动绑定（兼容） |
@@ -82,9 +84,13 @@ psql "$DATABASE_URL" -f ascBackend/sql/bot_identity.sql
 
 这些是顶层指令（不需要 `astracup` 前缀）。如果与其它插件重名，AstrBot 可能同时触发多个处理器，建议停用冲突插件或调整指令名。
 
+图池只返回 **`mappool_visible=true` 且 `approved=true`** 的图；图池未公开时不会返回任何图，只会提示“图池尚未公开”。
+
 LLM 工具（由 Agent 自动调用）：
 
 - `astracup_query_rules`
+- `astracup_get_settings`
+- `astracup_query_mappool`
 - `astracup_list_rooms`
 - `astracup_get_player`
 - `astracup_book_room`

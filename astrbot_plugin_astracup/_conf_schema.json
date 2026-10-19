@@ -3,7 +3,7 @@
     "description": "astarcup 后端地址",
     "type": "string",
     "default": "http://localhost:4000",
-    "hint": "例如 https://api.example.com，不要以 / 结尾",
+    "hint": "填站点根地址，例如 https://www.rino.ink；插件会自动拼接 /api/bot/*。填成 .../api 也可以，会自动去掉末尾的 /api",
     "obvious_hint": true
   },
   "bot_token": {
