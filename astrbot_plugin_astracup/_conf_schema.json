@@ -1,0 +1,23 @@
+{
+  "base_url": {
+    "description": "astarcup 后端地址",
+    "type": "string",
+    "default": "http://localhost:4000",
+    "hint": "例如 https://api.example.com，不要以 / 结尾",
+    "obvious_hint": true
+  },
+  "bot_token": {
+    "description": "Bot Token",
+    "type": "string",
+    "default": "",
+    "secret": true,
+    "hint": "必须与后端环境变量 BOT_TOKEN 完全一致",
+    "obvious_hint": true
+  },
+  "timeout": {
+    "description": "请求超时（秒）",
+    "type": "int",
+    "default": 10,
+    "hint": "连接后端时的最长等待时间"
+  }
+}

@@ -16,6 +16,9 @@ pub struct Config {
     pub osu_redirect_uri: String,
     pub storage_dir: String,
     pub vocab_dir: String,
+    // AstrBot 专用接口（留空则禁用）
+    pub bot_token: String,
+    pub bot_rules_dir: String,
     // g0v0 私服 OAuth 绑定（API 与 osu! v2 一致）
     pub g0v0_enabled: bool,
     pub g0v0_client_id: String,
@@ -57,6 +60,8 @@ impl Config {
                 "VOCAB_DIR",
                 "/home/aecw/astarcup/astracup-web/src/app/api/content-detect/Vocabulary",
             ),
+            bot_token: env_or("BOT_TOKEN", ""),
+            bot_rules_dir: env_or("BOT_RULES_DIR", "./rules"),
             g0v0_enabled: env_or("G0V0_ENABLED", "false") == "true",
             g0v0_client_id: env_or("G0V0_CLIENT_ID", ""),
             g0v0_client_secret: env_or("G0V0_CLIENT_SECRET", ""),
