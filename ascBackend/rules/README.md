@@ -1,9 +1,13 @@
 # 比赛规则目录
 
-`/api/bot/rules` 在 `tournament_settings.rules` 为空时，会读取本目录下的 `{season}.md`。
+`/api/bot/rules` 的规则文本按以下优先级取值（见 `routes/bot_routes.rs::bot_rules`）：
+
+1. `tournament_settings.rules` 设置项（全局覆盖，优先级最高）；
+2. **`season_rules` 数据表**（正式存放位置，可在网站后台「内容管理 → 赛季规则」编辑）；
+3. 本目录下的 `{season}.md` 文件（兜底，仅当数据库中没有该赛季的记录时读取）。
 
 - 文件名与赛季 ID 对应，例如 `s1.md`、`s2.md`；
 - 内容为 Markdown，AstrBot 会原样交给模型阅读；
-- 也可以通过后台 `PUT /api/settings` 写入 `rules` 设置项来覆盖文件内容（优先级更高）。
+- 规则已迁移到数据库：初始化/迁移请执行 `sql/content_tables.sql`（含 s1/s2 播种，幂等可重复执行）。
 
-当前 `s1.md` / `s2.md` 是前端 `astarcup-rewireweb/src/data/guide/` 的副本，方便 Bot 开箱即用。更新比赛手册时请同步这两个文件，或者直接用 `rules` 设置项覆盖。
+本目录的 `s1.md` / `s2.md` 是历史副本（也是前端 `astarcup-rewireweb/src/data/guide/` 的副本），现在仅作兜底保留。数据库有记录后，更新比赛规则请直接在后台编辑，无需再改文件。

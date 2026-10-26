@@ -54,7 +54,7 @@ use crate::routes::messages_routes::{apply_message_action, load_message};
 use crate::routes::schedules_routes::{claimed_room_ids, load_bookable_room, notify_booking};
 use crate::schema::{
     bot_bind_codes, bot_bind_links, bot_platform_bindings, map_selections, match_rooms,
-    match_schedules, messages, player_matchups, tournament_settings, users,
+    match_schedules, messages, player_matchups, season_rules, tournament_settings, users,
 };
 use crate::state::AppState;
 
@@ -558,7 +558,7 @@ async fn bot_rules(
                 .map(str::to_string)
         });
 
-    // 规则文本优先取 tournament_settings.rules，其次读取 BOT_RULES_DIR/{season}.md
+    // 规则文本优先级：tournament_settings.rules（全局覆盖） → season_rules 表 → BOT_RULES_DIR/{season}.md 文件兜底
     let mut rules_markdown = settings
         .get("rules")
         .map(|r| strip_front_matter(&setting_str(r)))
@@ -568,6 +568,25 @@ async fn bot_rules(
     } else {
         "none"
     };
+    if rules_markdown.is_none() && valid_season_id(&season) {
+        let s = season.clone();
+        let from_db = run_db(&state.pool, move |conn| {
+            season_rules::table
+                .filter(season_rules::season.eq(s))
+                .select(season_rules::content)
+                .first::<String>(conn)
+                .optional()
+                .map_err(AppError::from)
+        })
+        .await?;
+        if let Some(text) = from_db {
+            let cleaned = strip_front_matter(&text);
+            if !cleaned.trim().is_empty() {
+                rules_markdown = Some(cleaned);
+                rules_source = "database";
+            }
+        }
+    }
     if rules_markdown.is_none() && valid_season_id(&season) {
         let path = std::path::Path::new(&state.config.bot_rules_dir).join(format!("{season}.md"));
         if let Ok(text) = tokio::fs::read_to_string(&path).await {
