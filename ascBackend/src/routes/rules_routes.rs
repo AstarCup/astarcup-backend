@@ -110,6 +110,11 @@ async fn admin_delete(
     Path(season): Path<String>,
 ) -> ApiResult<Json<Value>> {
     let season = season.trim().to_lowercase();
+    if !valid_season_id(&season) {
+        return Err(AppError::bad_request(
+            "赛季 ID 只能包含字母、数字、中划线或下划线（最长 32 位）",
+        ));
+    }
     let rows = run_db(&state.pool, move |conn| {
         diesel::delete(season_rules::table.filter(season_rules::season.eq(season)))
             .execute(conn)
