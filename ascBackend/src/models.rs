@@ -537,3 +537,69 @@ pub struct BotBindLink {
     pub used_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
 }
+
+// ============ News ============
+
+#[derive(Debug, Queryable, Identifiable, Selectable)]
+#[diesel(table_name = news)]
+pub struct News {
+    pub id: i32,
+    pub slug: String,
+    pub title: String,
+    pub description: String,
+    pub date: String,
+    pub content: String,
+    pub published: bool,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+impl News {
+    /// 列表用（不含正文，正文只在详情返回）
+    pub fn to_list_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "slug": self.slug,
+            "title": self.title,
+            "description": self.description,
+            "date": self.date,
+            "published": self.published,
+            "updatedAt": self.updated_at.and_utc().to_rfc3339(),
+        })
+    }
+
+    /// 详情用（含 markdown 正文）
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "slug": self.slug,
+            "title": self.title,
+            "description": self.description,
+            "date": self.date,
+            "content": self.content,
+            "published": self.published,
+            "createdAt": self.created_at.and_utc().to_rfc3339(),
+            "updatedAt": self.updated_at.and_utc().to_rfc3339(),
+        })
+    }
+}
+
+// ============ SeasonRule ============
+
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = season_rules)]
+pub struct SeasonRule {
+    pub season: String,
+    pub content: String,
+    pub updated_at: NaiveDateTime,
+}
+
+impl SeasonRule {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "season": self.season,
+            "content": self.content,
+            "updatedAt": self.updated_at.and_utc().to_rfc3339(),
+        })
+    }
+}

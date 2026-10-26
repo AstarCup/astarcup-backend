@@ -289,6 +289,30 @@ table! {
     }
 }
 
+table! {
+    // 资讯（原前端 src/data/news/*.md 迁入数据库）
+    news (id) {
+        id -> Int4,
+        slug -> Text,
+        title -> Text,
+        description -> Text,
+        date -> Text,
+        content -> Text,
+        published -> Bool,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    // 赛季规则（原 ascBackend/rules/{season}.md 迁入数据库，供 Bot 读取）
+    season_rules (season) {
+        season -> Text,
+        content -> Text,
+        updated_at -> Timestamp,
+    }
+}
+
 joinable!(match_schedules -> match_rooms (room_id));
 joinable!(match_scores -> match_schedules (schedule_id));
 joinable!(player_matchups -> match_rooms (room_id));
@@ -309,4 +333,6 @@ allow_tables_to_appear_in_same_query!(
     bot_platform_bindings,
     bot_bind_codes,
     bot_bind_links,
+    news,
+    season_rules,
 );
