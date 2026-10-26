@@ -52,12 +52,9 @@ struct NewsInput {
     #[serde(default)]
     date: String,
     content: String,
-    #[serde(default = "default_true")]
-    published: bool,
-}
-
-fn default_true() -> bool {
-    true
+    /// 省略时为 None：创建默认发布，更新时保留原状态
+    #[serde(default)]
+    published: Option<bool>,
 }
 
 fn validate(input: &NewsInput) -> Result<(), AppError> {
@@ -79,12 +76,16 @@ fn validate(input: &NewsInput) -> Result<(), AppError> {
     if input.content.trim().is_empty() {
         return Err(AppError::bad_request("正文不能为空"));
     }
+    normalize_date(&input.date)?;
     Ok(())
 }
 
 /// 日期统一为 YYYY-MM-DD（列表按 date 字符串排序，格式必须一致）
-fn normalize_date(raw: &str) -> String {
-    raw.trim().replace('/', "-")
+fn normalize_date(raw: &str) -> Result<String, AppError> {
+    let normalized = raw.trim().replace('/', "-");
+    let date = chrono::NaiveDate::parse_from_str(&normalized, "%Y-%m-%d")
+        .map_err(|_| AppError::bad_request("日期格式必须为 YYYY-MM-DD"))?;
+    Ok(date.format("%Y-%m-%d").to_string())
 }
 
 // ============ GET /api/news ============
@@ -160,6 +161,7 @@ async fn admin_create(
         return Err(AppError::conflict("该 slug 已存在"));
     }
 
+    let date = normalize_date(&input.date)?;
     let now = Utc::now().naive_utc();
     let created = run_db(&state.pool, move |conn| {
         diesel::insert_into(news::table)
@@ -167,9 +169,9 @@ async fn admin_create(
                 news::slug.eq(input.slug.trim()),
                 news::title.eq(input.title.trim()),
                 news::description.eq(input.description.trim()),
-                news::date.eq(normalize_date(&input.date)),
+                news::date.eq(date),
                 news::content.eq(&input.content),
-                news::published.eq(input.published),
+                news::published.eq(input.published.unwrap_or(true)),
                 news::created_at.eq(now),
                 news::updated_at.eq(now),
             ))
@@ -189,41 +191,41 @@ async fn admin_update(
     Json(input): Json<NewsInput>,
 ) -> ApiResult<Json<Value>> {
     validate(&input)?;
-    let slug = input.slug.trim().to_string();
-    let conflict = run_db(&state.pool, {
-        let slug = slug.clone();
-        move |conn| {
-            news::table
-                .filter(news::slug.eq(slug))
-                .filter(news::id.ne(id))
-                .first::<News>(conn)
-                .optional()
-                .map_err(AppError::from)
-        }
-    })
-    .await?;
-    if conflict.is_some() {
-        return Err(AppError::conflict("该 slug 已存在"));
-    }
-
+    let date = normalize_date(&input.date)?;
     let now = Utc::now().naive_utc();
     let updated = run_db(&state.pool, move |conn| {
+        let existing = news::table
+            .find(id)
+            .first::<News>(conn)
+            .optional()
+            .map_err(AppError::from)?
+            .ok_or_else(|| AppError::not_found("资讯不存在"))?;
+
+        let slug = input.slug.trim().to_string();
+        let conflict = news::table
+            .filter(news::slug.eq(&slug))
+            .filter(news::id.ne(id))
+            .first::<News>(conn)
+            .optional()
+            .map_err(AppError::from)?;
+        if conflict.is_some() {
+            return Err(AppError::conflict("该 slug 已存在"));
+        }
+
         diesel::update(news::table.find(id))
             .set((
-                news::slug.eq(input.slug.trim()),
+                news::slug.eq(slug),
                 news::title.eq(input.title.trim()),
                 news::description.eq(input.description.trim()),
-                news::date.eq(normalize_date(&input.date)),
+                news::date.eq(date),
                 news::content.eq(&input.content),
-                news::published.eq(input.published),
+                news::published.eq(input.published.unwrap_or(existing.published)),
                 news::updated_at.eq(now),
             ))
             .get_result::<News>(conn)
-            .optional()
             .map_err(AppError::from)
     })
     .await?;
-    let updated = updated.ok_or_else(|| AppError::not_found("资讯不存在"))?;
     Ok(ok_msg("资讯已更新", updated.to_json()))
 }
 
