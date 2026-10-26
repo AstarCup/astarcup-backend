@@ -472,6 +472,9 @@ async fn update_schedule_status(
 struct UpdateDetailsBody {
     #[serde(rename = "season", default)]
     season: Option<String>,
+    /// 显式清除赛季（season 留空且不传该标志时不修改）
+    #[serde(rename = "clearSeason", alias = "clear_season", default)]
+    clear_season: bool,
     #[serde(rename = "redScore", alias = "red_score", default)]
     red_score: Option<i32>,
     #[serde(rename = "blueScore", alias = "blue_score", default)]
@@ -509,10 +512,16 @@ async fn update_schedule_details(
             return Err(AppError::bad_request("无效的赛季 ID"));
         }
     }
+    // Some(None) = 清除赛季，Some(Some(v)) = 设置，None = 不修改
+    let season_change = if body.clear_season {
+        Some(None)
+    } else {
+        season.map(Some)
+    };
     let n = run_db(&state.pool, move |conn| {
         diesel::update(match_schedules::table.find(id))
             .set((
-                season.map(|v| match_schedules::season.eq(v)),
+                season_change.map(|v| match_schedules::season.eq(v)),
                 body.red_score.map(|v| match_schedules::red_score.eq(v)),
                 body.blue_score.map(|v| match_schedules::blue_score.eq(v)),
                 body.match_link

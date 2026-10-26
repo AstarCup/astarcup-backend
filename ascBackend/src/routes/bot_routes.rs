@@ -1435,13 +1435,9 @@ async fn create_bot_bind_code(
 
     run_db(&state.pool, move |conn| {
         conn.transaction::<_, AppError, _>(|conn| {
-            // 同一账号只保留最新一个未使用的绑定码
-            diesel::delete(
-                bot_bind_codes::table
-                    .filter(bot_bind_codes::osu_id.eq(&osu_id))
-                    .filter(bot_bind_codes::used_at.is_null()),
-            )
-            .execute(conn)?;
+            // 同一账号只保留最新一个绑定码（旧码无论是否用过都作废）
+            diesel::delete(bot_bind_codes::table.filter(bot_bind_codes::osu_id.eq(&osu_id)))
+                .execute(conn)?;
             diesel::insert_into(bot_bind_codes::table)
                 .values((
                     bot_bind_codes::code_hash.eq(&code_hash),
@@ -1677,12 +1673,11 @@ async fn create_bot_bind_link(
     let user_id_for_db = platform_user_id.clone();
     run_db(&state.pool, move |conn| {
         conn.transaction::<_, AppError, _>(|conn| {
-            // 同一平台身份只保留最新一个未使用链接
+            // 同一平台身份只保留最新一个绑定链接（旧链接无论是否用过都作废）
             diesel::delete(
                 bot_bind_links::table
                     .filter(bot_bind_links::platform.eq(&platform_for_db))
-                    .filter(bot_bind_links::platform_user_id.eq(&user_id_for_db))
-                    .filter(bot_bind_links::used_at.is_null()),
+                    .filter(bot_bind_links::platform_user_id.eq(&user_id_for_db)),
             )
             .execute(conn)?;
             diesel::insert_into(bot_bind_links::table)
