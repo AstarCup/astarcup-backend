@@ -60,10 +60,7 @@ impl Config {
                 "http://localhost:4000/api/auth/callback",
             ),
             storage_dir: env_or("STORAGE_DIR", "./storage"),
-            vocab_dir: env_or(
-                "VOCAB_DIR",
-                "/home/aecw/astarcup/astracup-web/src/app/api/content-detect/Vocabulary",
-            ),
+            vocab_dir: env_or("VOCAB_DIR", "./Vocabulary"),
             bot_token: env_or("BOT_TOKEN", ""),
             bot_rules_dir: env_or("BOT_RULES_DIR", "./rules"),
             g0v0_enabled: env_or("G0V0_ENABLED", "false") == "true",
