@@ -36,6 +36,10 @@ fn env_or(key: &str, default: &str) -> String {
 
 impl Config {
     pub fn from_env() -> Self {
+        let jwt_secret = env_or("JWT_SECRET", "asc-dev-secret");
+        if jwt_secret == "asc-dev-secret" {
+            tracing::warn!("JWT_SECRET 未配置，正在使用开发默认值；生产环境必须设置");
+        }
         Config {
             port: env_or("PORT", "4000").parse().unwrap_or(4000),
             database_url: env_or("DATABASE_URL", ""),
@@ -45,7 +49,7 @@ impl Config {
                 .filter(|s| !s.is_empty())
                 .collect(),
             frontend_url: env_or("FRONTEND_URL", "http://localhost:3000"),
-            jwt_secret: env_or("JWT_SECRET", "asc-dev-secret"),
+            jwt_secret,
             jwt_expire_days: env_or("JWT_EXPIRE_DAYS", "30").parse().unwrap_or(30),
             cookie_domain: env_or("COOKIE_DOMAIN", ""),
             cookie_secure: env_or("COOKIE_SECURE", "false") == "true",
