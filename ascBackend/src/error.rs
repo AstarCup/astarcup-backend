@@ -53,6 +53,15 @@ impl IntoResponse for AppError {
 
 impl From<diesel::result::Error> for AppError {
     fn from(e: diesel::result::Error) -> Self {
+        // 唯一约束冲突属于可预期的业务冲突（重复绑定、slug 重复等），返回 409 而不是 500
+        if let diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::UniqueViolation,
+            info,
+        ) = &e
+        {
+            tracing::warn!("db unique violation: {}", info.message());
+            return AppError::conflict("数据已存在或存在冲突，请刷新后重试");
+        }
         tracing::error!("db error: {e}");
         AppError::internal("数据库操作失败")
     }

@@ -60,6 +60,23 @@ fn ensure_schema(pool: &DbPool) {
         )",
         "CREATE INDEX IF NOT EXISTS bot_bind_links_identity_idx
             ON bot_bind_links (platform, platform_user_id)",
+        "CREATE TABLE IF NOT EXISTS news (
+            id SERIAL PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            date TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            published BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE INDEX IF NOT EXISTS news_published_date_idx ON news (published, date)",
+        "CREATE TABLE IF NOT EXISTS season_rules (
+            season TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
         "ALTER TABLE \"MatchSchedule\" ADD COLUMN IF NOT EXISTS \"season\" TEXT",
         "CREATE INDEX IF NOT EXISTS \"MatchSchedule_season_idx\"
             ON \"MatchSchedule\" (\"season\")",

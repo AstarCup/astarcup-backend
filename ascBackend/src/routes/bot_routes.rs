@@ -570,7 +570,7 @@ async fn bot_rules(
     };
     if rules_markdown.is_none() && valid_season_id(&season) {
         let s = season.clone();
-        let from_db = run_db(&state.pool, move |conn| {
+        let from_db = match run_db(&state.pool, move |conn| {
             season_rules::table
                 .filter(season_rules::season.eq(s))
                 .select(season_rules::content)
@@ -578,7 +578,15 @@ async fn bot_rules(
                 .optional()
                 .map_err(AppError::from)
         })
-        .await?;
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                // 表未迁移等情况不应让整个接口失败，降级到文件兜底
+                tracing::warn!("读取 season_rules 失败，回退到 rules 目录: {e}");
+                None
+            }
+        };
         if let Some(text) = from_db {
             let cleaned = strip_front_matter(&text);
             if !cleaned.trim().is_empty() {
