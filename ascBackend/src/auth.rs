@@ -249,7 +249,7 @@ pub async fn exchange_code(
         ])
         .send()
         .await
-        .map_err(|e| AppError::internal(format!("请求 osu! 授权服务器失败: {e}")))?;
+        .map_err(|e| AppError::bad_gateway(format!("请求 osu! 授权服务器失败: {e}")))?;
     let status = resp.status();
     let body: Value = resp
         .json()
@@ -269,7 +269,7 @@ pub async fn fetch_osu_me(http: &reqwest::Client, access_token: &str) -> Result<
         .bearer_auth(access_token)
         .send()
         .await
-        .map_err(|e| AppError::internal(format!("请求 osu! 用户信息失败: {e}")))?;
+        .map_err(|e| AppError::bad_gateway(format!("请求 osu! 用户信息失败: {e}")))?;
     let status = resp.status();
     let body: Value = resp
         .json()

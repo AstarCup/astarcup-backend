@@ -42,6 +42,10 @@ impl AppError {
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, msg)
     }
+    /// 上游服务（如 osu! API）不可达，区别于本地逻辑错误
+    pub fn bad_gateway(msg: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_GATEWAY, msg)
+    }
 }
 
 impl IntoResponse for AppError {

@@ -100,7 +100,13 @@ async fn callback(
         }
         Err(e) => {
             tracing::error!("OAuth 回调失败: {}", e.message);
-            err_redirect("token_failed")
+            // 区分「osu! 不可达」与「授权码/令牌无效」，前端据此给出不同提示
+            let code = if e.status == StatusCode::BAD_GATEWAY {
+                "osu_unreachable"
+            } else {
+                "token_failed"
+            };
+            err_redirect(code)
         }
     }
 }
