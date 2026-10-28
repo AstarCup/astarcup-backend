@@ -68,6 +68,7 @@ table! {
         created_by -> Varchar,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        season -> Nullable<Varchar>,
     }
 }
 
@@ -114,6 +115,7 @@ table! {
         created_by -> Varchar,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        season -> Nullable<Varchar>,
     }
 }
 

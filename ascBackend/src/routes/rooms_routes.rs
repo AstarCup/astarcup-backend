@@ -25,7 +25,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/rooms", get(list_rooms).post(create_room))
         .route("/api/rooms/saved", get(saved_rooms))
-        .route("/api/rooms/{id}", get(get_room).delete(delete_room))
+        .route(
+            "/api/rooms/{id}",
+            get(get_room).patch(update_room).delete(delete_room),
+        )
         .route(
             "/api/rooms/{id}/scores",
             get(room_scores).post(save_room_scores),
@@ -37,6 +40,8 @@ pub fn router() -> Router<AppState> {
 #[derive(serde::Deserialize)]
 struct RoomsQuery {
     status: Option<String>,
+    /// 赛季过滤：不传 = 全部，值为赛季 ID 时只看该赛季
+    season: Option<String>,
     #[serde(rename = "withSchedules", default)]
     with_schedules: bool,
 }
@@ -55,11 +60,18 @@ async fn list_rooms(
         _ => None,
     };
     let with_schedules = q.with_schedules;
+    let season_filter = q
+        .season
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty() && s != "all");
 
     let rooms = run_db(&state.pool, move |conn| {
         let mut query = match_rooms::table.into_boxed();
         if let Some(s) = status_filter {
             query = query.filter(match_rooms::status.eq(s));
+        }
+        if let Some(s) = season_filter {
+            query = query.filter(match_rooms::season.eq(s));
         }
         query
             .order(match_rooms::created_at.desc())
@@ -179,6 +191,8 @@ struct CreateRoomBody {
     match_number: i32,
     max_participants: Option<i32>,
     description: Option<String>,
+    /// 赛季 ID；不传时取系统设置里的 current_season
+    season: Option<String>,
 }
 
 /// 解析前端传来的 ISO 日期时间字符串（容忍 Z 后缀）
@@ -203,6 +217,11 @@ async fn create_room(
     }
     let match_date = parse_dt(&body.match_date)?;
     let match_time = parse_dt(&body.match_time)?;
+    // 赛季：显式传入优先，否则落当前赛季，保证每个房间都有赛季归属
+    let season = match body.season.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => s.to_ascii_lowercase(),
+        _ => crate::routes::schedules_routes::current_season(&state).await?,
+    };
     let room = run_db(&state.pool, move |conn| {
         let now = Utc::now().naive_utc();
         diesel::insert_into(match_rooms::table)
@@ -218,12 +237,58 @@ async fn create_room(
                 match_rooms::created_by.eq(&admin.osu_id),
                 match_rooms::created_at.eq(now),
                 match_rooms::updated_at.eq(now),
+                match_rooms::season.eq(season),
             ))
             .get_result::<MatchRoom>(conn)
             .map_err(AppError::from)
     })
     .await?;
     Ok(ok_msg("比赛房间创建成功", room.to_json()))
+}
+
+// ============ PATCH /api/rooms/{id} ============
+
+#[derive(serde::Deserialize)]
+struct UpdateRoomBody {
+    /// 把房间改到另一个赛季；房间下的赛程会一起迁移，保持“赛程跟随房间”
+    season: Option<String>,
+}
+
+async fn update_room(
+    State(state): State<AppState>,
+    _admin: crate::auth::AdminUser,
+    Path(id): Path<i32>,
+    Json(body): Json<UpdateRoomBody>,
+) -> ApiResult<Json<Value>> {
+    let season = body
+        .season
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::bad_request("缺少赛季参数"))?;
+
+    let room = run_db(&state.pool, move |conn| {
+        conn.transaction(|txn| {
+            let now = Utc::now().naive_utc();
+            let updated = diesel::update(match_rooms::table.find(id))
+                .set((
+                    match_rooms::season.eq(&season),
+                    match_rooms::updated_at.eq(now),
+                ))
+                .get_result::<MatchRoom>(txn)
+                .map_err(AppError::from)?;
+            // 赛程跟随房间赛季
+            diesel::update(match_schedules::table.filter(match_schedules::room_id.eq(id)))
+                .set((
+                    match_schedules::season.eq(&season),
+                    match_schedules::updated_at.eq(now),
+                ))
+                .execute(txn)
+                .map_err(AppError::from)?;
+            Ok(updated)
+        })
+    })
+    .await?;
+    Ok(ok_msg("房间赛季已更新", room.to_json()))
 }
 
 // ============ DELETE /api/rooms/{id} ============

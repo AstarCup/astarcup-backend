@@ -4,7 +4,7 @@
 //   POST  /api/schedules                三模式创建：管理员模式 / 消息通知模式 / 普通模式
 //   PATCH /api/schedules/{id}           状态更新（玩家确认/取消权限链）
 //   PATCH /api/schedules/{id}/details   详情更新（管理员：比分/链接/状态）
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, patch};
 use axum::{Json, Router};
 use chrono::Utc;
@@ -31,9 +31,26 @@ pub fn router() -> Router<AppState> {
 
 // ============ GET /api/schedules ============
 
-async fn list_schedules(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    let schedules = run_db(&state.pool, |conn| {
-        match_schedules::table
+#[derive(serde::Deserialize)]
+struct SchedulesQuery {
+    /// 赛季过滤：不传 = 全部
+    season: Option<String>,
+}
+
+async fn list_schedules(
+    State(state): State<AppState>,
+    Query(q): Query<SchedulesQuery>,
+) -> ApiResult<Json<Value>> {
+    let season_filter = q
+        .season
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty() && s != "all");
+    let schedules = run_db(&state.pool, move |conn| {
+        let mut query = match_schedules::table.into_boxed();
+        if let Some(s) = season_filter {
+            query = query.filter(match_schedules::season.eq(s));
+        }
+        query
             .order(match_schedules::created_at.desc())
             .load::<MatchSchedule>(conn)
             .map_err(AppError::from)
@@ -88,7 +105,6 @@ async fn create_schedule(
 ) -> ApiResult<Json<Value>> {
     let permissions = permissions_json(&state, &user.osu_id).await?;
     let is_admin = permissions["isadmin"].as_bool().unwrap_or(false);
-    let season = current_season(&state).await?;
 
     // 模式 1：管理员创建（不需要对战 ID）
     if body.is_admin_create {
@@ -113,6 +129,8 @@ async fn create_schedule(
         let room_id = i32::try_from(room_id).map_err(|_| AppError::bad_request("无效的房间ID"))?;
         let room = load_room(&state, room_id).await?;
         ensure_not_within_2h(&room)?;
+        // 赛程赛季跟随房间，保证「房间 / 赛程」在同一赛季内
+        let season = season_of_room(&state, &room).await?;
         let schedule = insert_schedule(
             &state,
             room_id,
@@ -120,7 +138,7 @@ async fn create_schedule(
             p1u,
             p2,
             p2u,
-            season.clone(),
+            season,
             user.osu_id.clone(),
         )
         .await?;
@@ -160,6 +178,13 @@ async fn create_schedule(
 
     // 房间必须存在、open、未被占用，且距开赛 ≥2 小时
     let room = load_bookable_room(&state, room_id).await?;
+    // 跨赛季预约直接拒绝：对战与房间必须属于同一赛季
+    if !same_season(matchup.season.as_deref(), room.season.as_deref()) {
+        return Err(AppError::bad_request(
+            "该对战与所选房间不属于同一赛季，请选择对应赛季的房间",
+        ));
+    }
+    let season = season_of_room(&state, &room).await?;
 
     // 模式 3（send_notification）：只发送邀请并置 pending，待对手确认后再创建赛程
     if body.send_notification {
@@ -349,6 +374,25 @@ pub(crate) async fn current_season(state: &AppState) -> Result<String, AppError>
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "s1".to_string());
     Ok(season)
+}
+
+/// 房间的赛季（房间没标注时回退到当前赛季）
+pub(crate) async fn season_of_room(state: &AppState, room: &MatchRoom) -> Result<String, AppError> {
+    match room.season.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => Ok(s.to_ascii_lowercase()),
+        _ => current_season(state).await,
+    }
+}
+
+/// 两个赛季是否兼容：任一方未标注都视为兼容，都标注时必须一致
+pub(crate) fn same_season(a: Option<&str>, b: Option<&str>) -> bool {
+    match (
+        a.map(str::trim).filter(|s| !s.is_empty()),
+        b.map(str::trim).filter(|s| !s.is_empty()),
+    ) {
+        (Some(x), Some(y)) => x.eq_ignore_ascii_case(y),
+        _ => true,
+    }
 }
 
 async fn insert_schedule(

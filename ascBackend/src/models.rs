@@ -101,6 +101,7 @@ pub struct MatchRoom {
     pub created_by: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub season: Option<String>,
 }
 
 impl MatchRoom {
@@ -115,6 +116,7 @@ impl MatchRoom {
             "maxParticipants": self.max_participants,
             "status": self.status.as_str(),
             "description": self.description,
+            "season": self.season,
             "createdBy": self.created_by,
             "createdAt": self.created_at.and_utc().to_rfc3339(),
             "updatedAt": self.updated_at.and_utc().to_rfc3339(),
@@ -187,6 +189,7 @@ pub struct PlayerMatchup {
     pub created_by: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub season: Option<String>,
 }
 
 impl PlayerMatchup {
@@ -199,6 +202,7 @@ impl PlayerMatchup {
             "player2OsuId": self.player2_osu_id,
             "player2Username": self.player2_username,
             "status": self.status.as_str(),
+            "season": self.season,
             "createdBy": self.created_by,
             "createdAt": self.created_at.and_utc().to_rfc3339(),
             "updatedAt": self.updated_at.and_utc().to_rfc3339(),
