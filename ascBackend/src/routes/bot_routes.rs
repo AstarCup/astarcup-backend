@@ -155,7 +155,7 @@ fn setting_str(raw: &str) -> String {
     }
 }
 
-fn setting_bool(raw: Option<&String>) -> bool {
+pub(crate) fn setting_bool(raw: Option<&String>) -> bool {
     raw.map(|r| match serde_json::from_str::<Value>(r) {
         Ok(Value::Bool(b)) => b,
         _ => r.trim().eq_ignore_ascii_case("true"),
@@ -170,7 +170,9 @@ fn setting_number(raw: Option<&String>) -> Option<f64> {
     })
 }
 
-async fn load_settings_map(state: &AppState) -> Result<HashMap<String, String>, AppError> {
+pub(crate) async fn load_settings_map(
+    state: &AppState,
+) -> Result<HashMap<String, String>, AppError> {
     let rows = run_db(&state.pool, |conn| {
         tournament_settings::table
             .load::<crate::models::TournamentSetting>(conn)

@@ -27,6 +27,8 @@ fn default_settings() -> Vec<(&'static str, Value)> {
         ("current_season_stage", json!("registration")),
         ("registration_enabled", json!(true)),
         ("mappool_visible", json!(false)),
+        // 是否使用 g0v0 私服比赛：开启后报名才要求绑定 g0v0 账号
+        ("use_gv0", json!(false)),
     ]
 }
 

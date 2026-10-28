@@ -129,20 +129,24 @@ async fn register(
         return Err(AppError::bad_request("请填写 QQ 号"));
     }
 
-    // 报名门槛：必须先绑定 g0v0 服务器账号
-    let osu_id_check = body.osu_id.clone();
-    let bound: Option<String> = run_db(&state.pool, move |conn| {
-        users::table
-            .filter(users::osu_id.eq(&osu_id_check))
-            .select(users::gu_server_user_id)
-            .first::<Option<String>>(conn)
-            .optional()
-            .map_err(AppError::from)
-    })
-    .await?
-    .flatten();
-    if bound.as_deref().map(|s| s.is_empty()).unwrap_or(true) {
-        return Err(AppError::forbidden("请先绑定 g0v0 服务器账号后再报名"));
+    // 报名门槛：仅在「使用 g0v0 比赛」开启时才强制绑定 g0v0 账号
+    let settings = crate::routes::bot_routes::load_settings_map(&state).await?;
+    let require_gv0 = crate::routes::bot_routes::setting_bool(settings.get("use_gv0"));
+    if require_gv0 {
+        let osu_id_check = body.osu_id.clone();
+        let bound: Option<String> = run_db(&state.pool, move |conn| {
+            users::table
+                .filter(users::osu_id.eq(&osu_id_check))
+                .select(users::gu_server_user_id)
+                .first::<Option<String>>(conn)
+                .optional()
+                .map_err(AppError::from)
+        })
+        .await?
+        .flatten();
+        if bound.as_deref().map(|s| s.is_empty()).unwrap_or(true) {
+            return Err(AppError::forbidden("请先绑定 g0v0 服务器账号后再报名"));
+        }
     }
 
     let season = current_season(&state).await?;
@@ -349,6 +353,8 @@ async fn me_next_match(
 ) -> ApiResult<Json<Value>> {
     use crate::schema::{match_rooms, player_matchups};
     let osu_id = user.osu_id.clone();
+    // 只取当前赛季的对战：历史赛季的对战不应作为「下一场」出现
+    let current = crate::routes::schedules_routes::current_season(&state).await?;
     let matchup = run_db(&state.pool, move |conn| {
         player_matchups::table
             .filter(
@@ -356,8 +362,11 @@ async fn me_next_match(
                     .eq(&osu_id)
                     .or(player_matchups::player2_osu_id.eq(&osu_id)),
             )
+            .filter(player_matchups::status.ne(crate::enums::MatchupStatus::Completed))
             .filter(
-                player_matchups::status.ne(crate::enums::MatchupStatus::Completed),
+                player_matchups::season
+                    .eq(&current)
+                    .or(player_matchups::season.is_null()),
             )
             .order(player_matchups::created_at.asc())
             .first::<crate::models::PlayerMatchup>(conn)
