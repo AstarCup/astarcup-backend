@@ -4,13 +4,16 @@
 //   GET    /api/rooms?status=&withSchedules=true    房间列表（status=open 过滤供 staff 选房）
 //   GET    /api/rooms/saved                         含赛程与分数统计的房间列表
 //   POST   /api/rooms                               创建房间（管理员）
+//   PATCH  /api/rooms/{id}                          修改房间赛季（管理员）
 //   DELETE /api/rooms/{id}                          删除房间及其赛程（管理员）
 //   GET    /api/rooms/{id}/scores                   房间的分数（scheduleIds → MatchScore）
 //   POST   /api/rooms/{id}/scores                   保存分数（管理员，真实写库）
+//
+// 开赛前 2 小时的房间会自动置为 closed（后台定时任务 + 读取列表时兜底）。
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use diesel::prelude::*;
 use serde_json::{Value, json};
 
@@ -20,6 +23,24 @@ use crate::error::{ApiResult, AppError, ok, ok_msg};
 use crate::models::{MatchRoom, MatchSchedule, MatchScore};
 use crate::schema::{match_rooms, match_schedules, match_scores};
 use crate::state::AppState;
+
+/// 距开赛不足 2 小时的 open 房间自动关闭；返回本次关闭的房间数。
+/// 幂等，列表读取与后台定时任务都会调用。
+pub(crate) async fn close_due_rooms(state: &AppState) -> Result<usize, AppError> {
+    run_db(&state.pool, |conn| {
+        let now = Utc::now().naive_utc();
+        diesel::update(match_rooms::table)
+            .filter(match_rooms::status.eq(RoomStatus::Open))
+            .filter(match_rooms::match_time.le(now + Duration::hours(2)))
+            .set((
+                match_rooms::status.eq(RoomStatus::Closed),
+                match_rooms::updated_at.eq(now),
+            ))
+            .execute(conn)
+            .map_err(AppError::from)
+    })
+    .await
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -53,6 +74,8 @@ async fn list_rooms(
     _user: crate::auth::SessionUser,
     Query(q): Query<RoomsQuery>,
 ) -> ApiResult<Json<Value>> {
+    // 先把到点的房间关掉，保证列表里的状态实时
+    close_due_rooms(&state).await?;
     let status_filter = match q.status.as_deref() {
         Some("open") => Some(RoomStatus::Open),
         Some("full") => Some(RoomStatus::Full),
@@ -124,6 +147,7 @@ async fn list_rooms(
 
 /// 含赛程与分数统计的房间（原 match-scores/save GET 无 roomId 分支）
 async fn saved_rooms(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    close_due_rooms(&state).await?;
     let (rooms, scores) = run_db(&state.pool, |conn| {
         let schedules = match_schedules::table
             .load::<MatchSchedule>(conn)
@@ -267,15 +291,18 @@ async fn update_room(
         .ok_or_else(|| AppError::bad_request("缺少赛季参数"))?;
 
     let room = run_db(&state.pool, move |conn| {
-        conn.transaction(|txn| {
+        conn.transaction::<MatchRoom, AppError, _>(|txn| {
             let now = Utc::now().naive_utc();
             let updated = diesel::update(match_rooms::table.find(id))
                 .set((
                     match_rooms::season.eq(&season),
                     match_rooms::updated_at.eq(now),
                 ))
-                .get_result::<MatchRoom>(txn)
+                .execute(txn)
                 .map_err(AppError::from)?;
+            if updated == 0 {
+                return Err(AppError::not_found("房间不存在"));
+            }
             // 赛程跟随房间赛季
             diesel::update(match_schedules::table.filter(match_schedules::room_id.eq(id)))
                 .set((
@@ -284,7 +311,10 @@ async fn update_room(
                 ))
                 .execute(txn)
                 .map_err(AppError::from)?;
-            Ok(updated)
+            match_rooms::table
+                .find(id)
+                .first::<MatchRoom>(txn)
+                .map_err(AppError::from)
         })
     })
     .await?;

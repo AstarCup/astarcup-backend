@@ -122,6 +122,23 @@ async fn main() {
         http,
         osu,
     };
+
+    // 后台任务：每分钟把距开赛不足 2 小时的房间自动置为 closed
+    {
+        let bg_state = state.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                match routes::rooms_routes::close_due_rooms(&bg_state).await {
+                    Ok(n) if n > 0 => tracing::info!("自动关闭 {n} 个到点房间"),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("自动关闭房间失败: {}", e.message),
+                }
+            }
+        });
+    }
+
     let app = routes::build_router()
         .layer(cors)
         .layer(axum::middleware::from_fn_with_state(state.clone(), log_request))
