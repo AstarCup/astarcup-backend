@@ -2,6 +2,7 @@
 // Bot 侧读取顺序见 bot_routes::bot_rules：tournament_settings.rules 全局覆盖
 // → season_rules 表 → rules/{season}.md 文件兜底
 //
+//   GET    /api/rules                 全部赛季规则（公开，前台 /guide 使用）
 //   GET    /api/admin/rules           全部赛季规则（管理员）
 //   PUT    /api/admin/rules/{season}  新建/更新（管理员）
 //   DELETE /api/admin/rules/{season}  删除（管理员，删后 Bot 回退读文件）
@@ -22,6 +23,7 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/api/rules", get(public_list))
         .route("/api/admin/rules", get(admin_list))
         .route(
             "/api/admin/rules/{season}",
@@ -32,6 +34,21 @@ pub fn router() -> Router<AppState> {
 #[derive(serde::Deserialize)]
 struct RuleInput {
     content: String,
+}
+
+// ============ GET /api/rules（公开） ============
+
+/// 前台比赛手册 /guide 读取用：与管理后台编辑的是同一份数据
+async fn public_list(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+    let items = run_db(&state.pool, |conn| {
+        season_rules::table
+            .order(season_rules::season.asc())
+            .load::<SeasonRule>(conn)
+            .map_err(AppError::from)
+    })
+    .await?;
+    let list: Vec<Value> = items.iter().map(|r| r.to_json()).collect();
+    Ok(ok(Value::Array(list)))
 }
 
 // ============ GET /api/admin/rules ============
