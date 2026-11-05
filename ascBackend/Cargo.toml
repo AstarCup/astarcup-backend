@@ -21,7 +21,7 @@ dotenvy = "0.15"
 # jsonwebtoken 10.x 必须显式启用恰好一个 crypto provider（rust_crypto），否则运行时验签 panic
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 
-zip = "2"
+zip = "9"
 regex = "1"
 rand = "0.8"
 sha2 = "0.10"
