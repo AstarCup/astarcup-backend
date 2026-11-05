@@ -405,7 +405,10 @@ async fn parse_osz(
             let f = zip
                 .by_index_raw(i)
                 .map_err(|e| AppError::bad_request(format!("读取zip失败: {e}")))?;
-            let name = f.name().to_string();
+            let name = f
+                .name()
+                .map_err(|e| AppError::bad_request(format!("读取zip文件名失败: {e}")))?
+                .into_owned();
             if name.to_lowercase().ends_with(".osu") {
                 osu_names.push(name);
             }
