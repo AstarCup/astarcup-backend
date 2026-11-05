@@ -21,7 +21,9 @@ dotenvy = "0.15"
 # jsonwebtoken 10.x 必须显式启用恰好一个 crypto provider（rust_crypto），否则运行时验签 panic
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 
-zip = "9"
+# 只保留 deflate（纯 Rust：flate2/zlib-rs + zopfli）。默认特性会引入
+# zstd/bzip2/lzma/xz 等需要 cl.exe 编译的 C 依赖，MSVC 下易构建失败
+zip = { version = "9", default-features = false, features = ["deflate"] }
 regex = "1"
 rand = "0.8"
 sha2 = "0.10"
