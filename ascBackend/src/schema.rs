@@ -315,6 +315,20 @@ table! {
     }
 }
 
+table! {
+    // 裁判控制台：工作人员 osu! OAuth token（含裁判 scope）
+    referee_tokens (osu_id) {
+        osu_id -> Varchar,
+        username -> Varchar,
+        access_token -> Text,
+        refresh_token -> Nullable<Text>,
+        expires_at -> Timestamp,
+        scope -> Text,
+        bound_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 joinable!(match_schedules -> match_rooms (room_id));
 joinable!(match_scores -> match_schedules (schedule_id));
 joinable!(player_matchups -> match_rooms (room_id));
@@ -337,4 +351,5 @@ allow_tables_to_appear_in_same_query!(
     bot_bind_links,
     news,
     season_rules,
+    referee_tokens,
 );

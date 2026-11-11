@@ -607,3 +607,30 @@ impl SeasonRule {
         })
     }
 }
+
+// ============ RefereeToken（裁判控制台 osu! OAuth 授权） ============
+
+#[allow(dead_code)] // 字段需与表列一一对应（Queryable），部分仅作留存
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = referee_tokens)]
+pub struct RefereeToken {
+    pub osu_id: String,
+    pub username: String,
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: NaiveDateTime,
+    pub scope: String,
+    pub bound_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+impl RefereeToken {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "bound": true,
+            "username": self.username,
+            "osuId": self.osu_id,
+            "expiresAt": self.expires_at.and_utc().to_rfc3339(),
+        })
+    }
+}
