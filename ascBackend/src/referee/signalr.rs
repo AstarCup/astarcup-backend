@@ -84,8 +84,10 @@ pub async fn connect(
 ) -> Result<(Arc<SignalRConnection>, tokio::task::JoinHandle<()>), String> {
     // 1. negotiate 换取 connectionToken
     let negotiate_url = format!("{http_base}{hub_path}/negotiate?negotiateVersion=1");
-    // reqwest 自动识别 HTTP(S)_PROXY 环境变量，代理下同样可用
-    let client = reqwest::Client::new();
+    // 代理：环境变量 / Windows 系统代理（另见 crate::proxy）
+    let client = crate::proxy::apply(reqwest::Client::builder())
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
     let resp = tokio::time::timeout(
         CONNECT_TIMEOUT,
         client.post(&negotiate_url).bearer_auth(token).send(),
@@ -117,6 +119,7 @@ pub async fn connect(
         url_encode(conn_token),
         url_encode(token)
     );
+    tracing::debug!("referee: negotiate 成功，准备建立 WebSocket: {ws_base}{hub_path}");
     let mut request = ws_url
         .as_str()
         .into_client_request()
@@ -141,6 +144,7 @@ pub async fn connect(
         _ => (host_port, 443u16),
     };
     let tcp = open_tcp(&host, port).await?;
+    tracing::debug!("referee: TCP 通道就绪（{host}:{port}），开始 TLS/WS 握手");
     let (ws, _) = tokio::time::timeout(
         CONNECT_TIMEOUT,
         client_async_tls_with_config(request, tcp, None, None),
@@ -148,6 +152,7 @@ pub async fn connect(
     .await
     .map_err(|_| "WebSocket 握手超时".to_string())?
     .map_err(|e| format!("WebSocket 连接失败: {e}"))?;
+    tracing::debug!("referee: WebSocket 已建立，开始 SignalR 握手");
 
     // 3. SignalR 握手
     let mut ws = ws;
@@ -167,6 +172,7 @@ pub async fn connect(
     if let Some(err) = hs_json["error"].as_str() {
         return Err(format!("握手被拒绝: {err}"));
     }
+    tracing::debug!("referee: SignalR 握手完成");
 
     // 4. 启动读写循环
     let (sink, stream) = ws.split();
@@ -180,27 +186,6 @@ pub async fn connect(
         run_loop(stream, task_conn, events).await;
     });
     Ok((conn, task))
-}
-
-/// 从环境变量读取 HTTP 代理（HTTPS_PROXY / ALL_PROXY 等）。
-/// reqwest 会自动使用这些变量；WebSocket 侧由 open_tcp 手动走 CONNECT 隧道。
-fn proxy_from_env() -> Option<String> {
-    for key in [
-        "ALL_PROXY",
-        "all_proxy",
-        "HTTPS_PROXY",
-        "https_proxy",
-        "HTTP_PROXY",
-        "http_proxy",
-    ] {
-        if let Ok(v) = std::env::var(key) {
-            let v = v.trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
-            }
-        }
-    }
-    None
 }
 
 /// 解析代理地址 `http://host:port`（省略 scheme 也接受；默认端口 80）
@@ -221,11 +206,14 @@ fn parse_proxy(url: &str) -> Result<(String, u16), String> {
 }
 
 /// 建立到目标 host:port 的 TCP：无代理直连；有代理则先 CONNECT 隧道。
+/// 代理来自 crate::proxy（环境变量或 Windows 系统代理）。
 async fn open_tcp(host: &str, port: u16) -> Result<TcpStream, String> {
-    let Some(proxy_url) = proxy_from_env() else {
-        return TcpStream::connect((host, port))
-            .await
-            .map_err(|e| format!("TCP 连接 {host}:{port} 失败: {e}"));
+    let Some(proxy_url) = crate::proxy::detect().map(|p| p.url.clone()) else {
+        return TcpStream::connect((host, port)).await.map_err(|e| {
+            format!(
+                "TCP 连接 {host}:{port} 失败: {e}（直连不可达；如需代理请设置 HTTPS_PROXY 或开启系统代理）"
+            )
+        });
     };
     let (ph, pp) = parse_proxy(&proxy_url)?;
     let mut stream = TcpStream::connect((ph.as_str(), pp))

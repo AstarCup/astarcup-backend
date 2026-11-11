@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use diesel::prelude::*;
+use futures_util::FutureExt;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::{RwLock, broadcast, watch};
@@ -170,16 +171,20 @@ impl RefereeService {
         command: &str,
         args: Vec<Value>,
     ) -> Result<Value, AppError> {
-        let session = self
-            .get_session(osu_id)
-            .await
-            .ok_or_else(|| AppError::bad_request("尚未连接裁判服务器"))?;
-        let conn = session
-            .conn
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| AppError::bad_request("尚未连接裁判服务器"))?;
+        let Some(session) = self.get_session(osu_id).await else {
+            return Err(AppError::bad_request(
+                "尚未连接裁判服务器：请先点顶栏的「连接裁判服务器」",
+            ));
+        };
+        let conn = session.conn.read().await.clone();
+        let Some(conn) = conn else {
+            // 把最近一次连接失败原因带出去，前端 toast 能直接看到根因
+            let detail = session
+                .current_state()
+                .last_error
+                .unwrap_or_else(|| "连接尚未建立".to_string());
+            return Err(AppError::bad_request(format!("尚未连接裁判服务器：{detail}")));
+        };
         tokio::time::timeout(INVOKE_TIMEOUT, conn.invoke(command, args))
             .await
             .map_err(|_| AppError::internal("裁判服务器响应超时"))?
@@ -421,7 +426,12 @@ async fn pump(svc: Arc<RefereeService>, osu_id: String) {
             return;
         }
         session.set_state("connecting", None);
-        match connect_once(&svc, &osu_id, &session.events).await {
+        // 握手阶段涉及 TLS/WS，任何 panic 都不能让状态永远停在「连接中」
+        let outcome = std::panic::AssertUnwindSafe(connect_once(&svc, &osu_id, &session.events))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|payload| Err(panic_message(payload)));
+        match outcome {
             Ok((conn, reader)) => {
                 attempts = 0;
                 {
@@ -458,12 +468,25 @@ async fn pump(svc: Arc<RefereeService>, osu_id: String) {
     }
 }
 
+/// 把 panic payload 变成可读错误
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        format!("内部错误: {s}")
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        format!("内部错误: {s}")
+    } else {
+        "内部错误: 连接任务异常退出".to_string()
+    }
+}
+
 async fn connect_once(
     svc: &RefereeService,
     osu_id: &str,
     events: &broadcast::Sender<(String, Value)>,
 ) -> Result<(Arc<SignalRConnection>, tokio::task::JoinHandle<()>), String> {
+    tracing::debug!("referee: 获取 access token…");
     let token = svc.ensure_token(osu_id).await.map_err(|e| e.message)?;
+    tracing::debug!("referee: access token 就绪（{} 字符）", token.len());
     // 直连不可达时可用 SPECTATOR_BASE 指向中转/反代（需 https://）
     let hub_base = std::env::var("SPECTATOR_BASE")
         .ok()

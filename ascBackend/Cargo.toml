@@ -29,7 +29,9 @@ rand = "0.8"
 sha2 = "0.10"
 
 # 裁判控制台：SignalR JSON 协议客户端（osu-server-spectator referee hub）
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+# TLS 用 native-tls（Windows 走 SChannel，Linux 走 OpenSSL，reqwest 默认也是它）：
+# tokio-tungstenite 0.26 的 rustls 特性不带 crypto provider，握手时会 panic。
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
 
 tracing = "0.1"

@@ -18,6 +18,7 @@ mod enums;
 mod error;
 mod models;
 mod osu_client;
+mod proxy;
 mod referee;
 mod routes;
 mod schema;
@@ -88,10 +89,11 @@ async fn main() {
     let config = Arc::new(Config::from_env());
     let pool = db::init_pool();
 
-    let http = reqwest::Client::builder()
-        .user_agent("astarcup-backend/1.0")
-        .build()
-        .expect("构建 HTTP 客户端失败");
+    let http = proxy::apply(
+        reqwest::Client::builder().user_agent("astarcup-backend/1.0"),
+    )
+    .build()
+    .expect("构建 HTTP 客户端失败");
     let osu = Arc::new(osu_client::OsuClient::new(http.clone(), &config));
     let referee = Arc::new(referee::RefereeService::new(
         pool.clone(),
