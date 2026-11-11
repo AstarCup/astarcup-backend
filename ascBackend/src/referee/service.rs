@@ -56,6 +56,9 @@ pub struct Session {
     pub events: broadcast::Sender<(String, Value)>,
     pub state_tx: watch::Sender<ConnState>,
     conn: RwLock<Option<Arc<SignalRConnection>>>,
+    /// 当前所在房间的快照（MakeRoom / JoinRoom 的返回）。
+    /// 前端刷新后用它恢复界面：此时服务端仍认为我们在房间里，不能再调 JoinRoom。
+    room: RwLock<Option<Value>>,
     intent: AtomicBool,
 }
 
@@ -67,6 +70,7 @@ impl Session {
             events,
             state_tx,
             conn: RwLock::new(None),
+            room: RwLock::new(None),
             intent: AtomicBool::new(false),
         }
     }
@@ -151,6 +155,7 @@ impl RefereeService {
             if let Some(conn) = session.conn.write().await.take() {
                 conn.close().await;
             }
+            *session.room.write().await = None;
             session.set_state("disconnected", None);
         }
         self.sessions.lock().await.remove(osu_id);
@@ -185,10 +190,37 @@ impl RefereeService {
                 .unwrap_or_else(|| "连接尚未建立".to_string());
             return Err(AppError::bad_request(format!("尚未连接裁判服务器：{detail}")));
         };
-        tokio::time::timeout(INVOKE_TIMEOUT, conn.invoke(command, args))
+        let result = tokio::time::timeout(INVOKE_TIMEOUT, conn.invoke(command, args))
             .await
             .map_err(|_| AppError::internal("裁判服务器响应超时"))?
-            .map_err(AppError::bad_request)
+            .map_err(AppError::bad_request)?;
+
+        // 记住当前房间：刷新页面后前端靠它恢复，避免重复 JoinRoom 被服务端拒绝
+        match command {
+            "MakeRoom" | "JoinRoom" => {
+                if result.is_object() {
+                    *session.room.write().await = Some(result.clone());
+                }
+            }
+            "CloseRoom" => *session.room.write().await = None,
+            _ => {}
+        }
+        Ok(result)
+    }
+
+    /// 当前所在房间的快照（未进房 / 连接断开时为 None）
+    pub async fn room(&self, osu_id: &str) -> Option<Value> {
+        let Some(session) = self.get_session(osu_id).await else {
+            return None;
+        };
+        session.room.read().await.clone()
+    }
+
+    /// 清掉房间快照（前端关闭 / 被踢时调用）
+    pub async fn clear_room(&self, osu_id: &str) {
+        if let Some(session) = self.get_session(osu_id).await {
+            *session.room.write().await = None;
+        }
     }
 
     // ============ osu! OAuth token 管理 ============
@@ -445,6 +477,8 @@ async fn pump(svc: Arc<RefereeService>, osu_id: String) {
                     let mut guard = session.conn.write().await;
                     *guard = None;
                 }
+                // 连接断开后服务端不再认为我们在房间里，快照同步失效
+                *session.room.write().await = None;
                 if !session.intent.load(Ordering::SeqCst) {
                     session.set_state("disconnected", None);
                     return;

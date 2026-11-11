@@ -70,6 +70,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/ref/bind/clear", post(bind_clear))
         .route("/api/ref/connect", post(connect))
         .route("/api/ref/status", get(status))
+        .route("/api/ref/room", get(current_room))
+        .route("/api/ref/room/clear", post(clear_room))
         .route("/api/ref/invoke", post(invoke))
         .route("/api/ref/events", get(events))
         .route("/api/ref/chat/send", post(chat_send))
@@ -239,6 +241,21 @@ async fn status(State(state): State<AppState>, user: SessionUser) -> ApiResult<J
         "state": st.state,
         "lastError": st.last_error,
     })))
+}
+
+/// GET /api/ref/room —— 后端记住的当前房间快照
+///（刷新页面时服务端仍认为我们在房间里，用它恢复界面而不是重复 JoinRoom）
+async fn current_room(State(state): State<AppState>, user: SessionUser) -> ApiResult<Json<Value>> {
+    require_referee(&state, &user.osu_id).await?;
+    let room = state.referee.room(&user.osu_id).await;
+    Ok(ok(json!({ "room": room })))
+}
+
+/// POST /api/ref/room/clear —— 主动关闭房间 / 被踢后清掉快照
+async fn clear_room(State(state): State<AppState>, user: SessionUser) -> ApiResult<Json<Value>> {
+    require_referee(&state, &user.osu_id).await?;
+    state.referee.clear_room(&user.osu_id).await;
+    Ok(ok(json!({ "room": null })))
 }
 
 #[derive(Deserialize)]
