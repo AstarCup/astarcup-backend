@@ -89,12 +89,8 @@ pub fn clear_session_cookie(cfg: &Config) -> String {
     cookie
 }
 
-fn read_cookie(parts: &Parts, name: &str) -> Option<String> {
-    let raw = parts
-        .headers
-        .get(axum::http::header::COOKIE)?
-        .to_str()
-        .ok()?;
+pub fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    let raw = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
     for pair in raw.split(';') {
         let mut it = pair.trim().splitn(2, '=');
         let k = it.next()?;
@@ -123,8 +119,8 @@ impl FromRequestParts<AppState> for SessionUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token =
-            read_cookie(parts, SESSION_COOKIE).ok_or_else(|| AppError::unauthorized("未登录"))?;
+        let token = read_cookie(&parts.headers, SESSION_COOKIE)
+            .ok_or_else(|| AppError::unauthorized("未登录"))?;
         let claims = verify_token(&state.config, &token)?;
         Ok(SessionUser {
             osu_id: claims.osu_id,
@@ -165,8 +161,8 @@ impl FromRequestParts<AppState> for AdminUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token =
-            read_cookie(parts, SESSION_COOKIE).ok_or_else(|| AppError::unauthorized("未登录"))?;
+        let token = read_cookie(&parts.headers, SESSION_COOKIE)
+            .ok_or_else(|| AppError::unauthorized("未登录"))?;
         let claims = verify_token(&state.config, &token)?;
         let osu_id = claims.osu_id.clone();
         let pool = state.pool.clone();
@@ -220,16 +216,28 @@ pub struct OsuToken {
 
 /// 生成 osu! 授权跳转 URL；state 用于 OAuth 完成后回跳到网站指定页面
 pub fn authorize_url(cfg: &Config, state: Option<&str>) -> String {
+    authorize_url_scoped(cfg, state, "identify")
+}
+
+/// 生成指定 scope 的 osu! 授权跳转 URL（裁判绑定需要更大授权范围）
+pub fn authorize_url_scoped(cfg: &Config, state: Option<&str>, scopes: &str) -> String {
     let mut url = format!(
-        "https://osu.ppy.sh/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify",
+        "https://osu.ppy.sh/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope={}",
         url_encode(&cfg.osu_client_id),
         url_encode(&cfg.osu_redirect_uri),
+        url_encode(scopes),
     );
     if let Some(state) = state {
         url.push_str("&state=");
         url.push_str(&url_encode(state));
     }
     url
+}
+
+/// 从请求头解析当前会话用户（不强制登录，失败返回 None）
+pub fn session_user_from_headers(cfg: &Config, headers: &axum::http::HeaderMap) -> Option<Claims> {
+    let token = read_cookie(headers, SESSION_COOKIE)?;
+    verify_token(cfg, &token).ok()
 }
 
 /// 用授权 code 换取 access token

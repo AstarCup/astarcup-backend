@@ -4,6 +4,7 @@
 //   POST /api/auth/logout        注销
 //   GET  /api/auth/me            当前用户信息 + 权限（未登录返回 401）
 use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -51,11 +52,19 @@ async fn auth_url(
     })))
 }
 
-/// GET /api/auth/callback?code=... —— OAuth 回调
+/// GET /api/auth/callback?code=... —— OAuth 回调（state 以 ref: 开头时转裁判绑定流程）
 async fn callback(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Response {
+    // 裁判控制台的授权也走本回调（同一 redirect_uri），按 state 前缀分流
+    if params
+        .get("state")
+        .is_some_and(|s| s.starts_with(crate::routes::ref_routes::REF_STATE_PREFIX))
+    {
+        return crate::routes::ref_routes::bind_callback(state, &params, &headers).await;
+    }
     let frontend = state.config.frontend_url.trim_end_matches('/').to_string();
     let err_redirect = |code: &str| -> Response {
         Redirect::temporary(&format!("{frontend}/register?error={code}")).into_response()

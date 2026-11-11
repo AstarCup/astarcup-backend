@@ -18,6 +18,7 @@ mod enums;
 mod error;
 mod models;
 mod osu_client;
+mod referee;
 mod routes;
 mod schema;
 mod state;
@@ -92,6 +93,12 @@ async fn main() {
         .build()
         .expect("构建 HTTP 客户端失败");
     let osu = Arc::new(osu_client::OsuClient::new(http.clone(), &config));
+    let referee = Arc::new(referee::RefereeService::new(
+        pool.clone(),
+        config.clone(),
+        http.clone(),
+        osu.clone(),
+    ));
 
     let cors = CorsLayer::new()
         .allow_origin(
@@ -121,6 +128,7 @@ async fn main() {
         config: config.clone(),
         http,
         osu,
+        referee,
     };
 
     // 后台任务：每分钟把距开赛不足 2 小时的房间自动置为 closed
@@ -141,7 +149,10 @@ async fn main() {
 
     let app = routes::build_router()
         .layer(cors)
-        .layer(axum::middleware::from_fn_with_state(state.clone(), log_request))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            log_request,
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

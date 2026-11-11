@@ -28,6 +28,10 @@ regex = "1"
 rand = "0.8"
 sha2 = "0.10"
 
+# 裁判控制台：SignalR JSON 协议客户端（osu-server-spectator referee hub）
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
