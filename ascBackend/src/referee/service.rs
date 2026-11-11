@@ -27,7 +27,7 @@ pub const REF_OAUTH_SCOPES: &str = "public identify chat.read chat.write multipl
 
 const OSU_API_BASE: &str = "https://osu.ppy.sh/api/v2";
 const TOKEN_URL: &str = "https://osu.ppy.sh/oauth/token";
-const HUB_BASE: &str = "https://spectator.ppy.sh";
+const DEFAULT_HUB_BASE: &str = "https://spectator.ppy.sh";
 const HUB_PATH: &str = "/referee";
 const INVOKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// 令牌过期前 60 秒视为无效，避免请求中途过期
@@ -464,5 +464,11 @@ async fn connect_once(
     events: &broadcast::Sender<(String, Value)>,
 ) -> Result<(Arc<SignalRConnection>, tokio::task::JoinHandle<()>), String> {
     let token = svc.ensure_token(osu_id).await.map_err(|e| e.message)?;
-    signalr::connect(HUB_BASE, HUB_PATH, &token, events.clone()).await
+    // 直连不可达时可用 SPECTATOR_BASE 指向中转/反代（需 https://）
+    let hub_base = std::env::var("SPECTATOR_BASE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .unwrap_or_else(|| DEFAULT_HUB_BASE.to_string());
+    signalr::connect(&hub_base, HUB_PATH, &token, events.clone()).await
 }

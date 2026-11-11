@@ -16,12 +16,13 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, broadcast, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, client_async_tls_with_config};
 
 use crate::auth::url_encode;
 
@@ -83,13 +84,17 @@ pub async fn connect(
 ) -> Result<(Arc<SignalRConnection>, tokio::task::JoinHandle<()>), String> {
     // 1. negotiate 换取 connectionToken
     let negotiate_url = format!("{http_base}{hub_path}/negotiate?negotiateVersion=1");
+    // reqwest 自动识别 HTTP(S)_PROXY 环境变量，代理下同样可用
     let client = reqwest::Client::new();
     let resp = tokio::time::timeout(
         CONNECT_TIMEOUT,
         client.post(&negotiate_url).bearer_auth(token).send(),
     )
     .await
-    .map_err(|_| "negotiate 超时".to_string())?
+    .map_err(|_| {
+        "negotiate 超时（网络不可达？可设置 HTTPS_PROXY 代理或 SPECTATOR_BASE 覆盖地址）"
+            .to_string()
+    })?
     .map_err(|e| format!("negotiate 请求失败: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("negotiate 被拒绝: HTTP {}", resp.status()));
@@ -113,15 +118,36 @@ pub async fn connect(
         url_encode(token)
     );
     let mut request = ws_url
+        .as_str()
         .into_client_request()
         .map_err(|e| format!("构造 WebSocket 请求失败: {e}"))?;
     if let Ok(v) = HeaderValue::from_str(&format!("Bearer {token}")) {
         request.headers_mut().insert("Authorization", v);
     }
-    let (ws, _) = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(request))
-        .await
-        .map_err(|_| "WebSocket 连接超时".to_string())?
-        .map_err(|e| format!("WebSocket 连接失败: {e}"))?;
+    if !ws_url.starts_with("wss://") {
+        return Err("仅支持 wss://（SPECTATOR_BASE 请用 https:// 开头）".to_string());
+    }
+    // 先建 TCP（支持 HTTP 代理 CONNECT 隧道），再在其上做 TLS + WS 握手
+    let host_port = ws_url
+        .trim_start_matches("wss://")
+        .split(['/', '?'])
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let (host, port) = match host_port.rsplit_once(':') {
+        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => {
+            (h.to_string(), p.parse::<u16>().unwrap_or(443))
+        }
+        _ => (host_port, 443u16),
+    };
+    let tcp = open_tcp(&host, port).await?;
+    let (ws, _) = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        client_async_tls_with_config(request, tcp, None, None),
+    )
+    .await
+    .map_err(|_| "WebSocket 握手超时".to_string())?
+    .map_err(|e| format!("WebSocket 连接失败: {e}"))?;
 
     // 3. SignalR 握手
     let mut ws = ws;
@@ -154,6 +180,89 @@ pub async fn connect(
         run_loop(stream, task_conn, events).await;
     });
     Ok((conn, task))
+}
+
+/// 从环境变量读取 HTTP 代理（HTTPS_PROXY / ALL_PROXY 等）。
+/// reqwest 会自动使用这些变量；WebSocket 侧由 open_tcp 手动走 CONNECT 隧道。
+fn proxy_from_env() -> Option<String> {
+    for key in [
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ] {
+        if let Ok(v) = std::env::var(key) {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 解析代理地址 `http://host:port`（省略 scheme 也接受；默认端口 80）
+fn parse_proxy(url: &str) -> Result<(String, u16), String> {
+    if url.starts_with("socks") {
+        return Err("暂不支持 socks5 代理，请改用 HTTP 代理（支持 CONNECT）".to_string());
+    }
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .unwrap_or(url);
+    match rest.rsplit_once(':') {
+        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) && !h.is_empty() => {
+            Ok((h.to_string(), p.parse::<u16>().map_err(|_| "代理端口无效")?))
+        }
+        _ => Ok((rest.trim_end_matches('/').to_string(), 80)),
+    }
+}
+
+/// 建立到目标 host:port 的 TCP：无代理直连；有代理则先 CONNECT 隧道。
+async fn open_tcp(host: &str, port: u16) -> Result<TcpStream, String> {
+    let Some(proxy_url) = proxy_from_env() else {
+        return TcpStream::connect((host, port))
+            .await
+            .map_err(|e| format!("TCP 连接 {host}:{port} 失败: {e}"));
+    };
+    let (ph, pp) = parse_proxy(&proxy_url)?;
+    let mut stream = TcpStream::connect((ph.as_str(), pp))
+        .await
+        .map_err(|e| format!("代理 {ph}:{pp} 连接失败: {e}"))?;
+    let req = format!(
+        "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Connection: Keep-Alive\r\n\r\n"
+    );
+    stream
+        .write_all(req.as_bytes())
+        .await
+        .map_err(|e| format!("代理 CONNECT 写入失败: {e}"))?;
+    // 读到响应头结束（\r\n\r\n）为止
+    let mut buf: Vec<u8> = Vec::new();
+    let mut tmp = [0u8; 512];
+    loop {
+        let n = stream
+            .read(&mut tmp)
+            .await
+            .map_err(|e| format!("代理 CONNECT 读取失败: {e}"))?;
+        if n == 0 {
+            return Err("代理在 CONNECT 阶段关闭了连接".to_string());
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 8192 {
+            return Err("代理 CONNECT 响应异常".to_string());
+        }
+    }
+    let head = String::from_utf8_lossy(&buf);
+    if !head.starts_with("HTTP/1.") || !head.contains(" 200") {
+        let first = head.lines().next().unwrap_or("");
+        return Err(format!("代理 CONNECT 被拒绝: {first}"));
+    }
+    Ok(stream)
 }
 
 async fn run_loop(
