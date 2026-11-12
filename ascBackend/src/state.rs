@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::agent::AgentService;
 use crate::config::Config;
 use crate::db::DbPool;
 use crate::osu_client::OsuClient;
@@ -14,4 +15,6 @@ pub struct AppState {
     pub osu: Arc<OsuClient>,
     /// 裁判控制台服务（osu! referee hub 连接管理）
     pub referee: Arc<RefereeService>,
+    /// 裁判 agent（DeepSeek 自动裁判）
+    pub agent: Arc<AgentService>,
 }

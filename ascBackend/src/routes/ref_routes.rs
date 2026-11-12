@@ -78,6 +78,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/ref/chat/messages", get(chat_messages))
         .route("/api/ref/user/{user_id}", get(user))
         .route("/api/ref/beatmap/{beatmap_id}", get(beatmap))
+        .route("/api/ref/agent/message", post(agent_message))
+        .route("/api/ref/agent/reset", post(agent_reset))
 }
 
 /// 管理员或 referee 角色才能使用裁判控制台
@@ -403,4 +405,50 @@ async fn beatmap(
         .map_err(|_| AppError::bad_request("beatmap id 无效"))?;
     let data = state.referee.beatmap(id).await?;
     Ok(ok(data))
+}
+
+// ============ 裁判 agent（DeepSeek） ============
+
+#[derive(serde::Deserialize)]
+struct AgentMessageBody {
+    #[serde(rename = "roomId")]
+    room_id: i64,
+    text: String,
+    #[serde(rename = "chatChannelId")]
+    chat_channel_id: Option<i64>,
+    #[serde(rename = "currentPlaylistItemId")]
+    current_playlist_item_id: Option<i64>,
+    #[serde(rename = "roomContext")]
+    room_context: Option<Value>,
+    /// 来源：ref（裁判）/ event（系统事件）/ player（玩家）；缺省按最严格的 player 处理
+    source: Option<String>,
+}
+
+/// POST /api/ref/agent/message —— 执行一轮裁判 agent（聊天命令 / 事件文本）
+async fn agent_message(
+    State(state): State<AppState>,
+    user: SessionUser,
+    Json(body): Json<AgentMessageBody>,
+) -> ApiResult<Json<Value>> {
+    require_referee(&state, &user.osu_id).await?;
+    let (reply, logs) = state
+        .agent
+        .run_turn(
+            &user.osu_id,
+            body.room_id,
+            body.chat_channel_id,
+            body.current_playlist_item_id,
+            &body.text,
+            &body.room_context.unwrap_or(Value::Null),
+            body.source.as_deref().unwrap_or("player"),
+        )
+        .await?;
+    Ok(ok(json!({ "reply": reply, "logs": logs })))
+}
+
+/// POST /api/ref/agent/reset —— 清空 agent 会话（含 BP 状态）
+async fn agent_reset(State(state): State<AppState>, user: SessionUser) -> ApiResult<Json<Value>> {
+    require_referee(&state, &user.osu_id).await?;
+    state.agent.reset(&user.osu_id).await;
+    Ok(ok(json!({ "reset": true })))
 }

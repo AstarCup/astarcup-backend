@@ -25,6 +25,10 @@ pub struct Config {
     pub g0v0_client_secret: String,
     pub g0v0_redirect_uri: String,
     pub g0v0_oauth_base: String,
+    // DeepSeek（裁判 agent；API key 留空则禁用）
+    pub deepseek_api_key: String,
+    pub deepseek_base_url: String,
+    pub deepseek_model: String,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -71,6 +75,9 @@ impl Config {
                 "http://localhost:4000/api/bind/callback",
             ),
             g0v0_oauth_base: env_or("G0V0_OAUTH_BASE", "https://lazer-api.g0v0.top"),
+            deepseek_api_key: env_or("DEEPSEEK_API_KEY", ""),
+            deepseek_base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            deepseek_model: env_or("DEEPSEEK_MODEL", "deepseek-chat"),
         }
     }
 }
