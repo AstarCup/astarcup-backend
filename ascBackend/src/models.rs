@@ -634,3 +634,62 @@ impl RefereeToken {
         })
     }
 }
+
+// ============ PlayerSticker（选手卡片表情贴纸） ============
+
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = player_stickers)]
+pub struct PlayerSticker {
+    pub id: i32,
+    pub osu_id: String,
+    pub token: String,
+    pub x: f64,
+    pub y: f64,
+    pub created_by: String,
+    pub created_at: NaiveDateTime,
+}
+
+impl PlayerSticker {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "osuId": self.osu_id,
+            "token": self.token,
+            "x": self.x,
+            "y": self.y,
+            "createdBy": self.created_by,
+            "createdAt": self.created_at.and_utc().to_rfc3339(),
+        })
+    }
+}
+// ============ CanvasSticker（首页画布贴纸） ============
+
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = canvas_stickers)]
+pub struct CanvasSticker {
+    pub id: i32,
+    pub page: String,
+    pub token: String,
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
+    pub rotation: f64,
+    pub created_by: String,
+    pub created_at: NaiveDateTime,
+}
+
+impl CanvasSticker {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "page": self.page,
+            "token": self.token,
+            "x": self.x,
+            "y": self.y,
+            "scale": self.scale,
+            "rotation": self.rotation,
+            "createdBy": self.created_by,
+            "createdAt": self.created_at.and_utc().to_rfc3339(),
+        })
+    }
+}

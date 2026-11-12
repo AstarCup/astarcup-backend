@@ -329,6 +329,34 @@ table! {
     }
 }
 
+table! {
+    // 选手卡片上的自定义表情贴纸（/registrations）
+    player_stickers (id) {
+        id -> Int4,
+        osu_id -> Varchar,
+        token -> Varchar,
+        x -> Float8,
+        y -> Float8,
+        created_by -> Varchar,
+        created_at -> Timestamp,
+    }
+}
+
+table! {
+    // 画布贴纸（首页大画布）：带缩放 / 旋转
+    canvas_stickers (id) {
+        id -> Int4,
+        page -> Varchar,
+        token -> Varchar,
+        x -> Float8,
+        y -> Float8,
+        scale -> Float8,
+        rotation -> Float8,
+        created_by -> Varchar,
+        created_at -> Timestamp,
+    }
+}
+
 joinable!(match_schedules -> match_rooms (room_id));
 joinable!(match_scores -> match_schedules (schedule_id));
 joinable!(player_matchups -> match_rooms (room_id));
@@ -352,4 +380,6 @@ allow_tables_to_appear_in_same_query!(
     news,
     season_rules,
     referee_tokens,
+    player_stickers,
+    canvas_stickers,
 );

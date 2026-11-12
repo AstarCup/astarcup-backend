@@ -91,6 +91,39 @@ fn ensure_schema(pool: &DbPool) {
             bound_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )",
+        // 选手卡片上的自定义表情贴纸（/registrations）
+        "CREATE TABLE IF NOT EXISTS player_stickers (
+            id SERIAL PRIMARY KEY,
+            osu_id VARCHAR(64) NOT NULL,
+            token VARCHAR(128) NOT NULL,
+            x DOUBLE PRECISION NOT NULL,
+            y DOUBLE PRECISION NOT NULL,
+            created_by VARCHAR(64) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE INDEX IF NOT EXISTS player_stickers_osu_idx
+            ON player_stickers (osu_id)",
+        "CREATE INDEX IF NOT EXISTS player_stickers_created_by_idx
+            ON player_stickers (created_by)",
+        // 限速查询用：按人 + 时间
+        "CREATE INDEX IF NOT EXISTS player_stickers_rate_idx
+            ON player_stickers (created_by, created_at)",
+        // 首页画布贴纸（可缩放 / 旋转）
+        "CREATE TABLE IF NOT EXISTS canvas_stickers (
+            id SERIAL PRIMARY KEY,
+            page VARCHAR(32) NOT NULL DEFAULT 'home',
+            token VARCHAR(128) NOT NULL,
+            x DOUBLE PRECISION NOT NULL,
+            y DOUBLE PRECISION NOT NULL,
+            scale DOUBLE PRECISION NOT NULL DEFAULT 1,
+            rotation DOUBLE PRECISION NOT NULL DEFAULT 0,
+            created_by VARCHAR(64) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )",
+        "CREATE INDEX IF NOT EXISTS canvas_stickers_page_idx
+            ON canvas_stickers (page)",
+        "CREATE INDEX IF NOT EXISTS canvas_stickers_rate_idx
+            ON canvas_stickers (created_by, created_at)",
     ];
 
     let Ok(mut conn) = pool.get() else {

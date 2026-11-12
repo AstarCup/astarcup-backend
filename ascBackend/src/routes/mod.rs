@@ -2,6 +2,7 @@ pub mod auth_routes;
 pub mod beatmaps_routes;
 pub mod bind_routes;
 pub mod bot_routes;
+pub mod canvas_stickers_routes;
 pub mod content_routes;
 pub mod maps_routes;
 pub mod matchups_routes;
@@ -15,6 +16,7 @@ pub mod rules_routes;
 pub mod schedules_routes;
 pub mod settings_routes;
 pub mod staff_routes;
+pub mod stickers_routes;
 pub mod users_routes;
 
 use axum::Router;
@@ -41,5 +43,7 @@ pub fn build_router() -> Router<AppState> {
         .merge(news_routes::router())
         .merge(rules_routes::router())
         .merge(content_routes::router())
+        .merge(stickers_routes::router())
+        .merge(canvas_stickers_routes::router())
         .merge(bot_routes::router())
 }
