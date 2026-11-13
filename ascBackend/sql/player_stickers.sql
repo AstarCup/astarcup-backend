@@ -1,5 +1,5 @@
 -- 选手卡片表情贴纸（/registrations）
--- 幂等：可重复执行。后端启动时也会自动建表（src/db.rs 的 ensure_schema）。
+-- 幂等：可重复执行。后端启动时也会自动建表（src/db.rs 的 MIGRATIONS 迁移）。
 
 CREATE TABLE IF NOT EXISTS player_stickers (
     id SERIAL PRIMARY KEY,

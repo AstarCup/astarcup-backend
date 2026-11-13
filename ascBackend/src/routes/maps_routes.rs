@@ -93,7 +93,10 @@ async fn list_selections(
         // 非公开访问需要管理员权限（原版 verifyMapSelectionAuth/verifyReplayAuth 均为管理员）
         let permissions = crate::routes::users_routes::permissions_json(
             &state,
-            &session.as_ref().unwrap().osu_id,
+            &session
+                .as_ref()
+                .ok_or_else(|| AppError::bad_request("缺少osu ID"))?
+                .osu_id,
         )
         .await?;
         if !permissions["isadmin"].as_bool().unwrap_or(false) {
@@ -287,7 +290,9 @@ async fn add_selection(
         let beatmap = if let Some(bid) = parsed.beatmap_id {
             fetch_beatmap_info(&state, bid).await?
         } else {
-            let bsid = parsed.beatmapset_id.unwrap();
+            let bsid = parsed
+                .beatmapset_id
+                .ok_or_else(|| AppError::bad_request("无效的osu! beatmap URL"))?;
             let maps = fetch_beatmapset_info(&state, bsid).await?;
             maps.first()
                 .cloned()
@@ -742,12 +747,12 @@ async fn get_comments(
         .await?;
         let mut grouped: serde_json::Map<String, Value> = serde_json::Map::new();
         for r in &rows {
-            grouped
+            let entry = grouped
                 .entry(r.map_selection_id.to_string())
-                .or_insert_with(|| json!([]))
-                .as_array_mut()
-                .unwrap()
-                .push(r.to_json());
+                .or_insert_with(|| json!([]));
+            if let Some(list) = entry.as_array_mut() {
+                list.push(r.to_json());
+            }
         }
         Ok(ok(Value::Object(grouped)))
     } else if let Some(mid) = q.map_selection_id {

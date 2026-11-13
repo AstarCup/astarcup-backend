@@ -20,7 +20,13 @@ use crate::util::storage_path;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/replays", post(upload_replay).delete(delete_replay))
+        .route(
+            "/api/replays",
+            // 回放文件（.osr）上传，单独放宽限制
+            post(upload_replay)
+                .delete(delete_replay)
+                .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         .route("/api/replays/archive", get(archive))
         .route("/api/replays/uploaded", get(uploaded))
 }
@@ -67,7 +73,8 @@ async fn upload_replay(
     if let Some(parent) = abs.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    tokio::fs::write(&abs, file_bytes.unwrap())
+    let file_bytes = file_bytes.ok_or_else(|| AppError::bad_request("参数缺失"))?;
+    tokio::fs::write(&abs, file_bytes)
         .await
         .map_err(|e| AppError::internal(format!("上传失败: {e}")))?;
     Ok(Json(

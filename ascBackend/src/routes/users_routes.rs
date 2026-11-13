@@ -440,6 +440,10 @@ async fn osu_user_proxy(
         .osu
         .get_json(&format!("/users/{user_id}"), &[])
         .await?;
+    // 查询即落库：顺手刷新 cover（custom_url 会随时变）、头像与 pp/rank
+    if let Err(e) = crate::auth::upsert_osu_user(&state.pool, &me).await {
+        tracing::warn!("刷新用户 {user_id} 资料失败: {}", e.message);
+    }
     Ok(ok(json!({
         "user": {
             "id": me["id"],

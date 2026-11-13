@@ -107,7 +107,10 @@ impl OsuClient {
         if !status.is_success() {
             let code = axum::http::StatusCode::from_u16(status.as_u16())
                 .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-            return Err(AppError::new(code, format!("osu! API 错误: {body}")));
+            return Err(AppError::new(
+                code,
+                format!("osu! API 错误 ({}): {body}", status.as_u16()),
+            ));
         }
         Ok(body)
     }

@@ -17,6 +17,7 @@ pub mod schedules_routes;
 pub mod settings_routes;
 pub mod staff_routes;
 pub mod stickers_routes;
+pub mod tasks_routes;
 pub mod users_routes;
 
 use axum::Router;
@@ -45,5 +46,6 @@ pub fn build_router() -> Router<AppState> {
         .merge(content_routes::router())
         .merge(stickers_routes::router())
         .merge(canvas_stickers_routes::router())
+        .merge(tasks_routes::router())
         .merge(bot_routes::router())
 }

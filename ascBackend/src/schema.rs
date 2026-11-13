@@ -50,6 +50,37 @@ table! {
         gu_refresh_token -> Nullable<Varchar>,
         // QQ 联系方式（报名可选填写）
         qq -> Nullable<Varchar>,
+        // cover 刷新时间戳（后台定时保鲜 custom_url）
+        cover_updated_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
+    scheduled_tasks (id) {
+        id -> Int4,
+        name -> Text,
+        title -> Text,
+        enabled -> Bool,
+        interval_secs -> Int4,
+        start_time -> Text,
+        run_amount -> Int4,
+        params -> diesel::sql_types::Jsonb,
+        last_run_at -> Nullable<Timestamp>,
+        last_run_note -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    staff_members (id) {
+        id -> Int4,
+        osu_id -> Text,
+        category -> Text,
+        position -> Text,
+        sort_order -> Int4,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
     }
 }
 

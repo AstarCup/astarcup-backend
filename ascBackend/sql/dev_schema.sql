@@ -35,12 +35,14 @@ CREATE TABLE "User" (
     "cover_custom_url" TEXT,
     "cover_url" TEXT,
     "cover_id" TEXT,
+    "cover_updated_at" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL
 );
 CREATE INDEX "User_osuId_idx" ON "User"("osuId");
 CREATE INDEX "User_username_idx" ON "User"("username");
 CREATE INDEX "User_userGroup_idx" ON "User"("userGroup");
+CREATE INDEX "User_cover_updated_at_idx" ON "User"("cover_updated_at");
 CREATE INDEX "User_registrationStatus_idx" ON "User"("registrationStatus");
 CREATE INDEX "User_season_idx" ON "User"("season");
 

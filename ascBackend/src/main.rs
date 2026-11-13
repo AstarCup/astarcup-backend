@@ -22,6 +22,7 @@ mod osu_client;
 mod proxy;
 mod referee;
 mod routes;
+mod scheduler;
 mod schema;
 mod state;
 mod util;
@@ -155,7 +156,12 @@ async fn main() {
         });
     }
 
+    // 计划任务调度器（cover 刷新等，配置见 scheduled_tasks 表 / 管理后台）
+    scheduler::spawn(state.clone());
+
     let app = routes::build_router()
+        // 显式全局请求体上限（2MB）：上传端点在各自路由层单独放宽
+        .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(cors)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

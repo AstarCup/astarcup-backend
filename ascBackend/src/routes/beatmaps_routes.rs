@@ -28,7 +28,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/beatmaps/parse-url", post(parse_url))
         .route("/api/beatmaps/mod-stats", post(mod_stats))
-        .route("/api/beatmaps/parse-osz", post(parse_osz))
+        .route(
+            "/api/beatmaps/parse-osz",
+            // 整包 .osz 谱面上传，体积可能很大（管理员端点，单独放宽限制）
+            post(parse_osz).layer(axum::extract::DefaultBodyLimit::max(100 * 1024 * 1024)),
+        )
         .route("/api/beatmaps/download", get(download_beatmap))
         .route("/api/files/{*path}", get(download_file))
 }
@@ -59,7 +63,9 @@ async fn parse_url(
     let beatmaps = if let Some(bid) = parsed.beatmap_id {
         vec![crate::routes::maps_routes::fetch_beatmap_info(&state, bid).await?]
     } else {
-        let bsid = parsed.beatmapset_id.unwrap();
+        let bsid = parsed
+            .beatmapset_id
+            .ok_or_else(|| AppError::bad_request("无效的osu! beatmap URL"))?;
         let maps = crate::routes::maps_routes::fetch_beatmapset_info(&state, bsid).await?;
         if maps.is_empty() {
             return Err(AppError::bad_request("该beatmapset中没有找到任何beatmap"));

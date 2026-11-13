@@ -332,6 +332,7 @@ pub async fn upsert_osu_user(pool: &DbPool, me: &Value) -> Result<User, AppError
                     users::cover_custom_url.eq(&cover_custom_url),
                     users::cover_url.eq(&cover_url),
                     users::cover_id.eq(&cover_id),
+                    users::cover_updated_at.eq(now),
                     users::updated_at.eq(now),
                 ))
                 .get_result::<User>(conn)
@@ -352,6 +353,7 @@ pub async fn upsert_osu_user(pool: &DbPool, me: &Value) -> Result<User, AppError
                     users::cover_custom_url.eq(&cover_custom_url),
                     users::cover_url.eq(&cover_url),
                     users::cover_id.eq(&cover_id),
+                    users::cover_updated_at.eq(now),
                     users::created_at.eq(now),
                     users::updated_at.eq(now),
                 ))

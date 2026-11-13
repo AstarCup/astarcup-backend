@@ -1,5 +1,5 @@
 -- 首页画布贴纸（带缩放 / 旋转）
--- 幂等：可重复执行。后端启动时也会自动建表（src/db.rs 的 ensure_schema）。
+-- 幂等：可重复执行。后端启动时也会自动建表（src/db.rs 的 MIGRATIONS 迁移）。
 
 CREATE TABLE IF NOT EXISTS canvas_stickers (
     id SERIAL PRIMARY KEY,

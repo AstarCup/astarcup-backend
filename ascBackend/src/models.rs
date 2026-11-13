@@ -8,6 +8,55 @@ use diesel::{Identifiable, Queryable, Selectable};
 use crate::enums::*;
 use crate::schema::*;
 
+// ============ ScheduledTask（计划任务） ============
+
+#[derive(Debug, Queryable, Identifiable, Selectable)]
+#[diesel(table_name = scheduled_tasks)]
+pub struct ScheduledTask {
+    pub id: i32,
+    pub name: String,
+    pub title: String,
+    pub enabled: bool,
+    pub interval_secs: i32,
+    pub start_time: String,
+    pub run_amount: i32,
+    pub params: Value,
+    pub last_run_at: Option<NaiveDateTime>,
+    pub last_run_note: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+impl ScheduledTask {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "name": self.name,
+            "title": self.title,
+            "enabled": self.enabled,
+            "intervalSecs": self.interval_secs,
+            "startTime": self.start_time,
+            "runAmount": self.run_amount,
+            "params": self.params,
+            "lastRunAt": self.last_run_at.map(|t| t.to_string()),
+            "lastRunNote": self.last_run_note,
+        })
+    }
+}
+
+// ============ StaffMember（工作人员名单：只记录谁是 staff、分类与职位） ============
+
+#[derive(Debug, Queryable, Identifiable, Selectable)]
+#[diesel(table_name = staff_members)]
+pub struct StaffMember {
+    pub id: i32,
+    pub osu_id: String,
+    pub category: String,
+    pub position: String,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
 // ============ User ============
 
 #[derive(Debug, Queryable, Identifiable, Selectable)]
@@ -44,6 +93,8 @@ pub struct User {
     pub gu_refresh_token: Option<String>,
     // QQ 联系方式（报名可选填写；仅用于联系，不作为机器人鉴权依据）
     pub qq: Option<String>,
+    // cover 刷新时间戳（后台定时保鲜 custom_url）
+    pub cover_updated_at: Option<NaiveDateTime>,
 }
 
 impl User {
